@@ -1,6 +1,4 @@
 src/
-go.sum
-go.mod
 .idea/
 .data/
 .DS_Store
