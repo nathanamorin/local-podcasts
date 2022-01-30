@@ -52,7 +52,5 @@ USER app:app
 # must be supplied to the docker command.
 EXPOSE 8080
 
-COPY static /app/static
-
 # Run
 CMD [ "/app/local-podcasts" ]
