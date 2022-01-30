@@ -20,8 +20,10 @@ RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -
 FROM node:16-alpine as app
 
 WORKDIR '/app'
-COPY ./app/ .
-WORKDIR '/app/local-podcasts'
+COPY ./app/local-podcasts/src .
+COPY ./app/local-podcasts/public .
+COPY ./app/local-podcasts/package-lock.json .
+COPY ./app/local-podcasts/package.json .
 RUN npm install
 RUN npm run build
 
@@ -40,7 +42,7 @@ RUN adduser -D app
 
 
 COPY --from=build /build/local-podcasts /app/local-podcasts
-COPY --from=app /app/local-podcasts/build /app/static/
+COPY --from=app /app/build /app/static/
 
 RUN chown app:app -R /app
 RUN chmod +x /app/local-podcasts
