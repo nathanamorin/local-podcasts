@@ -33,8 +33,11 @@ FROM alpine:latest
 
 WORKDIR /app
 
+RUN mkdir /app/static
+
 # add new user
 RUN adduser -D app
+
 
 COPY --from=build /build/local-podcasts /app/local-podcasts
 COPY --from=app /app/local-podcasts/build /app/static/
