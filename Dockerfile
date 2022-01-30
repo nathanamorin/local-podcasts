@@ -20,8 +20,8 @@ RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -
 FROM node:16-alpine as app
 
 WORKDIR '/app'
-COPY ./app/local-podcasts/src .
-COPY ./app/local-podcasts/public .
+COPY ./app/local-podcasts/src ./src
+COPY ./app/local-podcasts/public ./public
 COPY ./app/local-podcasts/package-lock.json .
 COPY ./app/local-podcasts/package.json .
 RUN npm install
