@@ -107,7 +107,7 @@ func TestParser_Parse(t *testing.T) {
 	assert.Empty(t, err)
 	assert.Equal(t, "Dan Carlin's Hardcore History", podcast.Name)
 	assert.Equal(t, "Dan+Carlin%27s+Hardcore+History", podcast.Id)
-	assert.Equal(t, 3, len(podcast.Episodes))
+	assert.Equal(t, 3, len(podcast.episodesMap))
 	assert.Equal(t, Episode{
 		Name:        "Show 67 - Supernova in the East VI",
 		Id:          "Show+67+-+Supernova+in+the+East+VI",
@@ -115,5 +115,5 @@ func TestParser_Parse(t *testing.T) {
 		AudioFile:   "http://dts.podtrac.com/redirect.mp3/traffic.libsyn.com/dancarlinhh/dchha67_Supernova_in_the_East_VI.mp3",
 		Length:      250137274,
 	},
-		podcast.Episodes["Show+67+-+Supernova+in+the+East+VI"])
+		podcast.episodesMap["Show+67+-+Supernova+in+the+East+VI"])
 }

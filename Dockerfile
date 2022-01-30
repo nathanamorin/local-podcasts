@@ -10,15 +10,24 @@ RUN go mod download
 
 # Copy the source code. Note the slash at the end, as explained in
 # https://docs.docker.com/engine/reference/builder/#copy
-COPY . ./
+COPY podcast ./podcast
+COPY main.go ./main.go
 #COPY podcast ./
 
 # Build
 RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -a -installsuffix cgo -o local-podcasts .
 
+FROM node:16-alpine as app
+
+WORKDIR '/app'
+COPY ./app/ .
+WORKDIR '/app/local-podcasts'
+RUN npm install
+RUN npm run build
+
 ##
 ## Deploy
-##
+###
 
 FROM alpine:latest
 
@@ -28,6 +37,7 @@ WORKDIR /app
 RUN adduser -D app
 
 COPY --from=build /build/local-podcasts /app/local-podcasts
+COPY --from=app /app/local-podcasts/build /app/static/
 
 RUN chown app:app -R /app
 RUN chmod +x /app/local-podcasts

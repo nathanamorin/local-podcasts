@@ -36,10 +36,6 @@ func main() {
 		}
 	}
 
-	e.GET("/", func(c echo.Context) error {
-		return c.String(http.StatusOK, "test")
-	})
-
 	e.GET("/podcasts", func(c echo.Context) error {
 
 		podcasts, err := podcast.ListPodcasts(config)
@@ -138,7 +134,7 @@ func main() {
 			return c.String(http.StatusInternalServerError, "{\"error\": \"error getting podcast\"}")
 		}
 
-		data, mimeType, err := podcastData.Stream(config, c.Param("episode_id"))
+		filePath, err := podcastData.GetAudioFile(config, c.Param("episode_id"))
 
 		if err != nil {
 			glog.Errorf("error getting stream: %s", err)
@@ -146,9 +142,8 @@ func main() {
 		}
 
 		c.Response().Status = http.StatusOK
-		c.Response().Header().Add(echo.HeaderContentType, mimeType)
-		_, err = c.Response().Write(data)
-		return err
+		http.ServeFile(c.Response().Writer, c.Request(), filePath)
+		return nil
 	})
 
 	e.Static("/", "static")

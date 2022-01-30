@@ -29,13 +29,14 @@ type Episode struct {
 }
 
 type Podcast struct {
-	Name              string              `json:"name"`
-	Description       string              `json:"description"`
-	Id                string              `json:"id"`
-	ImageFile         string              `json:"image_file"`
-	Episodes          map[string]*Episode `json:"episodes,omitempty"`
-	RSSUrl            string              `json:"rss_url"`
-	DisableAutoUpdate bool                `json:"auto_update"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	Id                string `json:"id"`
+	ImageFile         string `json:"image_file"`
+	episodesMap       map[string]*Episode
+	Episodes          []*Episode `json:"episodes,omitempty"`
+	RSSUrl            string     `json:"rss_url"`
+	DisableAutoUpdate bool       `json:"auto_update"`
 }
 
 type Config struct {
@@ -73,7 +74,7 @@ func (pw PodcastWatcher) EnqueuePodcast(podcast Podcast) {
 
 func NewPodcastObj() Podcast {
 	return Podcast{
-		Episodes: make(map[string]*Episode),
+		episodesMap: make(map[string]*Episode),
 	}
 }
 
@@ -103,7 +104,7 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 	if err != nil {
 		return nil, err
 	}
-	episodes := make(map[string]*Episode)
+	episodes := make([]*Episode, 0)
 	for _, item := range feed.Items {
 		if len(item.Enclosures) <= 0 {
 			continue
@@ -114,13 +115,13 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 			return nil, err
 		}
 		id := makeId(item.Title)
-		episodes[id] = &Episode{
+		episodes = append(episodes, &Episode{
 			Name:        item.Title,
 			Id:          id,
 			Description: item.Description,
 			AudioFile:   audio.URL,
 			Length:      time,
-		}
+		})
 	}
 
 	image := feed.Image
@@ -130,14 +131,19 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 	} else {
 		imageUrl = "static/default_image.jpg"
 	}
-	return &Podcast{
+	podcast := Podcast{
 		Name:        feed.Title,
 		Id:          makeId(feed.Title),
+		episodesMap: make(map[string]*Episode),
 		Description: feed.Description,
 		Episodes:    episodes,
 		ImageFile:   imageUrl,
 		RSSUrl:      rssUrl,
-	}, nil
+	}
+
+	podcast.fillEpisodeMap()
+
+	return &podcast, nil
 
 }
 
@@ -158,25 +164,19 @@ func (p Podcast) GetImage(config Config) ([]byte, string, error) {
 	return byteValue, mime.TypeByExtension(filepath.Ext(p.ImageFile)), nil
 }
 
-func (p Podcast) Stream(config Config, episodeId string) ([]byte, string, error) {
-	episode, ok := p.Episodes[episodeId]
+func (p Podcast) GetAudioFile(config Config, episodeId string) (string, error) {
+	episode, ok := p.episodesMap[episodeId]
 	if !ok {
-		return nil, "", fmt.Errorf("episode id (%s) not found", episodeId)
+		return "", fmt.Errorf("episode id (%s) not found", episodeId)
 	}
 	filePath := filepath.Join(config.FileHome, p.Id, episode.AudioFile)
-	audioFile, err := os.Open(filePath)
-	if err != nil {
-		return nil, "", err
-	}
-	defer audioFile.Close()
-
-	byteValue, err := ioutil.ReadAll(audioFile)
-
-	if err != nil {
-		return nil, "", err
+	if _, err := os.Stat(filePath); !errors.Is(err, os.ErrNotExist) {
+		if err != nil {
+			return "", err
+		}
 	}
 
-	return byteValue, mime.TypeByExtension(filepath.Ext(episode.AudioFile)), nil
+	return filePath, nil
 }
 
 func (p Podcast) mergeNewInfo(newPodcast *Podcast) {
@@ -232,13 +232,13 @@ func (p Podcast) Update(config Config) error {
 		p.mergeNewInfo(newPodcastInfo)
 	}
 
-	if p.Episodes == nil {
-		p.Episodes = make(map[string]*Episode)
+	if p.episodesMap == nil {
+		p.episodesMap = make(map[string]*Episode)
 	}
 
-	for id, ep := range newPodcastInfo.Episodes {
-		if _, ok := p.Episodes[id]; !ok {
-			p.Episodes[id] = ep
+	for id, ep := range newPodcastInfo.episodesMap {
+		if _, exists := p.episodesMap[id]; !exists {
+			p.episodesMap[id] = ep
 		}
 	}
 
@@ -246,12 +246,20 @@ func (p Podcast) Update(config Config) error {
 		return err
 	}
 
-	for id, _ := range p.Episodes {
-		err := p.SaveEpisode(config, p.Episodes[id])
+	for id, _ := range p.episodesMap {
+		err := p.SaveEpisode(config, p.episodesMap[id])
 		if err != nil {
 			return err
 		}
 	}
+
+	newEpisodes := make([]*Episode, 0)
+
+	for _, v := range p.episodesMap {
+		newEpisodes = append(newEpisodes, v)
+	}
+
+	p.Episodes = newEpisodes
 
 	err = p.SaveInfo(config)
 	if err != nil {
@@ -350,6 +358,15 @@ func (p Podcast) SaveInfo(config Config) error {
 	return nil
 }
 
+func (p Podcast) fillEpisodeMap() {
+	if p.episodesMap == nil {
+		p.episodesMap = make(map[string]*Episode)
+	}
+	for _, e := range p.Episodes {
+		p.episodesMap[e.Id] = e
+	}
+}
+
 func GetPodcast(config Config, id string) (*Podcast, error) {
 	filePath := filepath.Join(config.FileHome, id, podcastInfoFilename)
 	jsonFile, err := os.Open(filePath)
@@ -371,6 +388,7 @@ func GetPodcast(config Config, id string) (*Podcast, error) {
 		return nil, err
 	}
 
+	podcast.fillEpisodeMap()
 	return &podcast, nil
 
 }
