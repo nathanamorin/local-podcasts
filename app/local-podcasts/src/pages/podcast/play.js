@@ -29,7 +29,7 @@ export function PlayPodcast() {
     const location = useLocation()
 
 
-    const [state, setState] = useState({podcast: {}, episode: {}})  
+    const [state, setState] = useState({podcast: {}, episode: {description: ""}})  
 
     useEffect(() => {
         // Handle preserving state
@@ -151,7 +151,7 @@ export function PlayPodcast() {
                   {episode.name}
               </Heading>
               <Paragraph size="small" margin="medium" textAlign="center">
-              {episode.description}
+              {episode.description.replace(/(<([^>]+)>)/gi, "")}
               </Paragraph>
           </Box>
       </Box>
