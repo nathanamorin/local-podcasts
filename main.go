@@ -41,7 +41,7 @@ func main() {
 		glog.Errorf("error listing podcasts on start: %s", err)
 	} else {
 		for _, p := range podcasts {
-			pw.EnqueuePodcast(p)
+			pw.EnqueuePodcast(&p)
 		}
 	}
 
@@ -55,7 +55,7 @@ func main() {
 			glog.Errorf("error listing podcasts on refresh: %s", err)
 		} else {
 			for _, p := range podcasts {
-				pw.EnqueuePodcast(p)
+				pw.EnqueuePodcast(&p)
 			}
 		}
 
@@ -99,6 +99,8 @@ func main() {
 				glog.Errorf("error processing podcast rss url %s: %s", rssUrl.(string), err)
 				return c.String(http.StatusBadRequest, "{\"error\": \"error processing podcast rss url\"}")
 			}
+
+			pw.EnqueuePodcast(podcastData)
 
 			return c.JSON(http.StatusOK, podcastData)
 

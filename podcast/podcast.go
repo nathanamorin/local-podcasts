@@ -46,12 +46,12 @@ type Config struct {
 }
 
 type PodcastWatcher struct {
-	podcastsToUpdate chan Podcast
+	podcastsToUpdate chan *Podcast
 }
 
 func NewPodcastWatcher() PodcastWatcher {
 	return PodcastWatcher{
-		podcastsToUpdate: make(chan Podcast, 500),
+		podcastsToUpdate: make(chan *Podcast, 500),
 	}
 }
 
@@ -70,7 +70,7 @@ func (pw PodcastWatcher) Stop() {
 	close(pw.podcastsToUpdate)
 }
 
-func (pw PodcastWatcher) EnqueuePodcast(podcast Podcast) {
+func (pw PodcastWatcher) EnqueuePodcast(podcast *Podcast) {
 	pw.podcastsToUpdate <- podcast
 }
 
@@ -204,6 +204,7 @@ func AddPodcast(config Config, RSSUrl string) (*Podcast, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return newPodcastInfo, nil
 }
 
