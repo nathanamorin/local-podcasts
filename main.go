@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/go-co-op/gocron"
 	"github.com/golang/glog"
 	"github.com/labstack/echo/v4"
 	"github.com/nathanamorin/local-podcasts/podcast"
 	"log"
 	"net/http"
+	"time"
 )
 
 type podcastList struct {
@@ -36,6 +38,31 @@ func main() {
 		}
 	}
 
+	s := gocron.NewScheduler(time.UTC)
+
+	_, err = s.Every(1).Hour().Do(func() {
+
+		podcasts, err := podcast.ListPodcasts(config)
+
+		if err != nil {
+			glog.Errorf("error listing podcasts on refresh: %s", err)
+		} else {
+			for _, p := range podcasts {
+				pw.EnqueuePodcast(p)
+			}
+		}
+
+	})
+
+	if err != nil {
+		glog.Errorf("error setting up cron job refresh: %s", err)
+	}
+
+	s.StartAsync()
+
+	if err != nil {
+		return
+	}
 	e.GET("/podcasts", func(c echo.Context) error {
 
 		podcasts, err := podcast.ListPodcasts(config)

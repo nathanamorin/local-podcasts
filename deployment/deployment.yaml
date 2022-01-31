@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: local-podcasts
+---
+# This is an example PVC, it will likely be different in your environment
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: data-volume
+  namespace: local-podcasts
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: auto-nfs-client
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-podcasts
+  namespace: local-podcasts
+  labels:
+    app: local-podcasts
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: local-podcasts
+  template:
+    metadata:
+      labels:
+        app: local-podcasts
+        name: local-podcasts
+    spec:
+      containers:
+        - name: local-podcasts
+          # Check packages in github for latest version
+          image: ghcr.io/nathanamorin/local-podcasts:sha-792cbc8
+          volumeMounts:
+            - name: data-volume
+              mountPath: /data
+      volumes:
+        - name: data-volume
+          persistentVolumeClaim:
+            claimName: data-volume
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: local-podcasts
+  namespace: local-podcasts
+spec:
+  selector:
+    app: local-podcasts
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: local-podcasts
+---
+# Example ingress below, but will likely be different depending on your environment
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: local-podcasts
+  namespace: local-podcasts
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: "local-podcasts.nathanmorin.com"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: local-podcasts
+                port:
+                  number: 8080
