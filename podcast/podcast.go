@@ -300,6 +300,7 @@ func (p Podcast) SaveEpisode(config Config, episode *Episode) error {
 		// Assume mp3 if ext not defined
 		fileExtension = ".mp3"
 	}
+	fileExtension = strings.Split(fileExtension, "?")[0]
 	episodeFilename := episode.Id + fileExtension
 
 	episodeFilePath := filepath.Join(config.FileHome, p.Id, episodeFilename)

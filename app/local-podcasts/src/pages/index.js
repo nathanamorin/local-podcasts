@@ -161,8 +161,9 @@ export class Index extends React.Component {
           </Link>
         </Box>
       
-
+        <Box align="center" justify="center" direction="row" fill="horizontal" pad="large">
           {podcastElements}
+        </Box>
         </Box>
         
       </Grommet>
