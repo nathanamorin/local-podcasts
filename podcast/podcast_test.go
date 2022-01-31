@@ -104,16 +104,18 @@ const testData = `
 
 func TestParser_Parse(t *testing.T) {
 	podcast, err := parsePodcastRss(testData, "https://test123")
+	podcast.fillEpisodeMap()
 	assert.Empty(t, err)
 	assert.Equal(t, "Dan Carlin's Hardcore History", podcast.Name)
-	assert.Equal(t, "Dan+Carlin%27s+Hardcore+History", podcast.Id)
+	assert.Equal(t, "c81d442464cc19295f94a97e95d762c3", podcast.Id)
 	assert.Equal(t, 3, len(podcast.episodesMap))
-	assert.Equal(t, Episode{
-		Name:        "Show 67 - Supernova in the East VI",
-		Id:          "Show+67+-+Supernova+in+the+East+VI",
-		Description: "When do spirit, tenacity, resilience and bravery cross into madness? When cities are incinerated? When suicide attacks become the norm? When atomic weapons are used? Japan's leaders test the limits of national endurance in the war's last year.",
-		AudioFile:   "http://dts.podtrac.com/redirect.mp3/traffic.libsyn.com/dancarlinhh/dchha67_Supernova_in_the_East_VI.mp3",
-		Length:      250137274,
+	assert.Equal(t, &Episode{
+		Name:             "Show 67 - Supernova in the East VI",
+		Id:               "6e50678087dc4fc44ad8f23e4d30de94",
+		Description:      "When do spirit, tenacity, resilience and bravery cross into madness? When cities are incinerated? When suicide attacks become the norm? When atomic weapons are used? Japan's leaders test the limits of national endurance in the war's last year.",
+		AudioFile:        "http://dts.podtrac.com/redirect.mp3/traffic.libsyn.com/dancarlinhh/dchha67_Supernova_in_the_East_VI.mp3",
+		Length:           250137274,
+		PublishTimestamp: 1623165635,
 	},
-		podcast.episodesMap["Show+67+-+Supernova+in+the+East+VI"])
+		podcast.episodesMap["6e50678087dc4fc44ad8f23e4d30de94"])
 }

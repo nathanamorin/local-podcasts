@@ -2,7 +2,8 @@ import React from 'react'
 import {
   Link
 } from "react-router-dom";
-import { Grommet, Box, Heading, Paragraph } from 'grommet'
+import { Grommet, Box, Heading, Paragraph, Button} from 'grommet'
+import {AddCircle} from 'grommet-icons'
 
 const theme = {
   "name": "aruba",
@@ -143,7 +144,7 @@ export class Index extends React.Component {
                   {podcast.name}
               </Heading>
               <Paragraph size="small" margin="medium" textAlign="center">
-              {podcast.description}
+              {podcast.description.replace(/(<([^>]+)>)/gi, "")}
               </Paragraph>
           </Box>
       </Box>
@@ -152,7 +153,14 @@ export class Index extends React.Component {
 
     return (
       <Grommet full theme={theme}>
-        <Box align="center" justify="center" pad="small" background={{"color":"dark-2","image":"url('')"}} height="xlarge" flex={false} fill="vertical" direction="row" wrap overflow="auto">
+        <Box fill="vertical" background={{"color":"dark-2"}} overflow="auto" align="center" flex="grow" direction="column">
+
+        <Box align="center" justify="end" direction="row" fill="horizontal" pad="large">
+          <Link to="/podcast/add">
+            <Button icon={<AddCircle />} active={false} primary reverse={false} />
+          </Link>
+        </Box>
+      
 
           {podcastElements}
         </Box>

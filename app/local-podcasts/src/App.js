@@ -9,6 +9,7 @@ import {
 import { Index } from './pages/index'
 import { Podcast } from './pages/podcast'
 import { PlayPodcast } from './pages/podcast/play'
+import { AddPodcast } from './pages/podcast/add'
 
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
           <Route path="/" element={<Index />}/>
           <Route path="/podcast" element={<Podcast />}/>
           <Route path="/podcast/play" element={<PlayPodcast />}/>
+          <Route path="/podcast/add" element={<AddPodcast />}/>
         </Routes>
       </Router>
 

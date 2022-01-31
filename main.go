@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"github.com/go-co-op/gocron"
 	"github.com/golang/glog"
 	"github.com/labstack/echo/v4"
@@ -16,6 +17,12 @@ type podcastList struct {
 }
 
 func main() {
+
+	flag.Parse()
+	glog.Info("Info level")
+	glog.Error("Error level")
+	glog.Flush()
+
 	e := echo.New()
 
 	config := podcast.Config{

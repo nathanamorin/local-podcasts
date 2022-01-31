@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -21,11 +22,12 @@ const podcastInfoFilename = "info.json"
 const podcastImageFilenameNoExt = "image"
 
 type Episode struct {
-	Name        string `json:"name"`
-	Id          string `json:"id"`
-	Description string `json:"description"`
-	AudioFile   string `json:"audio_file"`
-	Length      int64
+	Name             string `json:"name"`
+	Id               string `json:"id"`
+	Description      string `json:"description"`
+	AudioFile        string `json:"audio_file"`
+	Length           int64
+	PublishTimestamp int64
 }
 
 type Podcast struct {
@@ -114,13 +116,15 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		id := makeId(item.Title)
 		episodes = append(episodes, &Episode{
-			Name:        item.Title,
-			Id:          id,
-			Description: item.Description,
-			AudioFile:   audio.URL,
-			Length:      time,
+			Name:             item.Title,
+			Id:               id,
+			Description:      item.Description,
+			AudioFile:        audio.URL,
+			Length:           time,
+			PublishTimestamp: item.PublishedParsed.Unix(),
 		})
 	}
 
@@ -239,6 +243,13 @@ func (p Podcast) Update(config Config) error {
 	for id, ep := range newPodcastInfo.episodesMap {
 		if _, exists := p.episodesMap[id]; !exists {
 			p.episodesMap[id] = ep
+		} else {
+			if !p.DisableAutoUpdate {
+				newEp := ep
+				newEp.AudioFile = p.episodesMap[id].AudioFile
+				newEp.Length = p.episodesMap[id].Length
+				p.episodesMap[id] = newEp
+			}
 		}
 	}
 
@@ -389,6 +400,12 @@ func GetPodcast(config Config, id string) (*Podcast, error) {
 	}
 
 	podcast.fillEpisodeMap()
+
+	// Sort by publish date
+	sort.Slice(podcast.Episodes, func(i, j int) bool {
+		return podcast.Episodes[i].PublishTimestamp < podcast.Episodes[j].PublishTimestamp
+	})
+
 	return &podcast, nil
 
 }

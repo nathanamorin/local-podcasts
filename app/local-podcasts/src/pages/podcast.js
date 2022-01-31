@@ -57,29 +57,25 @@ export function Podcast () {
           </Box>
       </Box>
 
-
-        <List data={episodes} paginate={false} pad="small">
-        {(episode) => (
-          <Box align="center" justify="between" fill="horizontal" direction="row-responsive">
-            <Link to="/podcast/play"
-                state={{ podcast: podcast, episode: episode}}  
-            >
-                <Button icon={<Play />} />
-            </Link>
-            
-            <Box align="start" justify="start" direction="column" >
-                <Text>
-                    {episode.name}
-                </Text>
+      <Box fill="horizontal">
+          <List data={episodes} paginate={false} pad="small">
+          {(episode) => (
+            <Box align="center" justify="start" fill="horizontal" direction="row-responsive">
+              <Link to="/podcast/play"
+                  state={{ podcast: podcast, episode: episode}}  
+              >
+                  <Button icon={<Play />} />
+              </Link>
+              
+              <Box align="start" justify="start" direction="column" >
+                  <Text>
+                      {episode.name}
+                  </Text>
+              </Box>
             </Box>
-            <Box align="end" justify="end" fill="vertical" direction="row" basis="medium">
-              <Text>
-                {episode.description}
-              </Text>
-            </Box>
-          </Box>
-        )}
-        </List>
+          )}
+          </List>
+        </Box>
 
 
         </Box>

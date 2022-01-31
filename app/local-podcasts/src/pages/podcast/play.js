@@ -137,6 +137,7 @@ export function PlayPodcast() {
                                 console.log("loaded metadata")
                                 e.target.currentTime = startTime
                             }}
+                            customAdditionalControls={[]}
                         />
 
   

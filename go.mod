@@ -8,6 +8,7 @@ require (
 	github.com/labstack/echo/v4 v4.6.3
 	github.com/mmcdole/gofeed v1.1.3
 	github.com/stretchr/testify v1.7.0
+	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 )
 
 require (
