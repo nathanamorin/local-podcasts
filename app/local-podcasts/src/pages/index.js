@@ -122,10 +122,6 @@ export class Index extends React.Component {
   }
 
   componentDidMount() {
-    this.UserList();
-  }
-
-  UserList() {
     fetch(`/podcasts`)
     .then((response) => response.json())
     .then(({ podcasts }) => this.setState({podcasts: podcasts}));
@@ -153,7 +149,7 @@ export class Index extends React.Component {
 
     return (
       <Grommet full theme={theme}>
-        <Box fill="vertical" background={{"color":"dark-2"}} overflow="auto" align="center" flex="grow" direction="column">
+        <Box fill="vertical" background={{"color":"dark-2"}} overflow="auto" align="center" justify="center" pad="small" height="xlarge" flex={false} fill="vertical" direction="row" wrap overflow="auto">
 
         <Box align="center" justify="end" direction="row" fill="horizontal" pad="large">
           <Link to="/podcast/add">
@@ -161,9 +157,7 @@ export class Index extends React.Component {
           </Link>
         </Box>
       
-        <Box align="center" justify="center" direction="row" fill="horizontal" pad="large">
           {podcastElements}
-        </Box>
         </Box>
         
       </Grommet>

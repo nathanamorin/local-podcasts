@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom';
-import { Grommet,Box, List, Button, Text, Heading, Paragraph } from 'grommet'
-import { Play } from 'grommet-icons'
+import { Grommet,Box, Heading, Paragraph } from 'grommet'
 
 import AudioPlayer from 'react-h5-audio-player';
 import 'react-h5-audio-player/lib/styles.css';
@@ -48,7 +47,6 @@ export function PlayPodcast() {
             episodeId = localStorage.getItem('currentEpisode')
 
             if (episodeId === null) {
-                console.log("undefined episodeId")
                 window.location.href = "/"
                 return
             }
@@ -60,25 +58,22 @@ export function PlayPodcast() {
             console.log("not something")
             localStorage.setItem('currentPodcast', location.state.podcast.id)
             podcastId = location.state.podcast.id
-        } 
+        } else {
+          podcastId = localStorage.getItem('currentPodcast')
+
+          if (podcastId === null) {
+              window.location.href = "/"
+              return
+          }
+        }
 
         if (episode !== null && podcast !== null) {
             setState({podcast: podcast, episode: episode})
             return
         } else {
-            podcastId = localStorage.getItem('currentPodcast')
-            console.log("someting else")
-            console.log(podcastId)
-            if (podcastId == null) {
-                console.log("not found")
-                window.location.href = "/"
-                return
-            }
-
+      
             fetch(`/podcasts/${podcastId}`)
-            .then(data => {
-              return data.json()
-            })
+            .then(data => data.json())
             .then(data => {
                 podcast = data
                 let found = false
@@ -112,7 +107,6 @@ export function PlayPodcast() {
 
 
     if (podcast.id === null) {
-        console.log("re blank")
         return (<Grommet full theme={theme}>
         <Box align="start" justify="center" pad="small" background={{"color":"dark-2","image":"url('')"}} height="xlarge" flex={false} fill="vertical" direction="row" wrap overflow="auto"/>
         </Grommet>)
@@ -167,8 +161,6 @@ export function PlayPodcast() {
 
         {audioPlayer} 
     </Box>
-
-
     
         </Box>
         
