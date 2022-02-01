@@ -4,17 +4,17 @@ go 1.17
 
 require (
 	github.com/go-co-op/gocron v1.11.0
-	github.com/golang/glog v1.0.0
 	github.com/labstack/echo/v4 v4.6.3
 	github.com/mmcdole/gofeed v1.1.3
 	github.com/stretchr/testify v1.7.0
-	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
+	k8s.io/klog/v2 v2.40.1
 )
 
 require (
 	github.com/PuerkitoBio/goquery v1.5.1 // indirect
 	github.com/andybalholm/cascadia v1.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/go-logr/logr v1.2.0 // indirect
 	github.com/json-iterator/go v1.1.10 // indirect
 	github.com/labstack/gommon v0.3.1 // indirect
 	github.com/mattn/go-colorable v0.1.11 // indirect

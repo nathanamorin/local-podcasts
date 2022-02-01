@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/golang/glog"
 	"github.com/mmcdole/gofeed"
 	"io/ioutil"
+	"k8s.io/klog/v2"
 	"mime"
 	"net/http"
 	"os"
@@ -60,7 +60,7 @@ func (pw PodcastWatcher) Run(config Config) {
 		for podcastToUpdate := range pw.podcastsToUpdate {
 			err := podcastToUpdate.Update(config)
 			if err != nil {
-				glog.Errorf("error updating podcast (%s): %s", podcastToUpdate.Name, err)
+				klog.Errorf("error updating podcast (%s): %s", podcastToUpdate.Name, err)
 			}
 		}
 	}()
@@ -289,7 +289,7 @@ func (p Podcast) SaveEpisode(config Config, episode *Episode) error {
 	if err := p.checkPodcastDirExists(config); err != nil {
 		return err
 	}
-	glog.Infof("downloading podcast: %s -> %s", p.Name, episode.Name)
+	klog.Infof("downloading podcast: %s -> %s", p.Name, episode.Name)
 	resp, err := http.Get(episode.AudioFile)
 	if err != nil {
 		return err
@@ -325,7 +325,7 @@ func (p Podcast) SaveEpisode(config Config, episode *Episode) error {
 	}
 
 	episode.AudioFile = episodeFilename
-	glog.Infof("finished downloading podcast: %s -> %s", p.Name, episode.Name)
+	klog.Infof("finished downloading podcast: %s -> %s", p.Name, episode.Name)
 	return nil
 }
 
