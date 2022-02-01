@@ -405,7 +405,7 @@ func GetPodcast(config Config, id string) (*Podcast, error) {
 
 	// Sort by publish date
 	sort.Slice(podcast.Episodes, func(i, j int) bool {
-		return podcast.Episodes[i].PublishTimestamp < podcast.Episodes[j].PublishTimestamp
+		return podcast.Episodes[i].PublishTimestamp > podcast.Episodes[j].PublishTimestamp
 	})
 
 	return &podcast, nil
