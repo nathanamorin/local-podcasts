@@ -39,6 +39,7 @@ type Podcast struct {
 	Episodes          []*Episode `json:"episodes,omitempty"`
 	RSSUrl            string     `json:"rss_url"`
 	DisableAutoUpdate bool       `json:"disable_auto_update,omitempty"`
+	LatestEpisode     *Episode   `json:"latest_episode"`
 }
 
 type Config struct {
@@ -425,6 +426,8 @@ func GetPodcast(config Config, id string) (*Podcast, error) {
 		return podcast.Episodes[i].PublishTimestamp > podcast.Episodes[j].PublishTimestamp
 	})
 
+	podcast.LatestEpisode = podcast.Episodes[0]
+
 	return &podcast, nil
 
 }
@@ -452,6 +455,10 @@ func ListPodcasts(config Config, includeEpisodes bool) ([]Podcast, error) {
 			podcasts = append(podcasts, *podcast)
 		}
 	}
+
+	sort.Slice(podcasts, func(i, j int) bool {
+		return podcasts[i].LatestEpisode.PublishTimestamp > podcasts[j].LatestEpisode.PublishTimestamp
+	})
 
 	return podcasts, nil
 }
