@@ -54,6 +54,9 @@ export function Podcast () {
               <Heading level="2" size="medium" margin="xsmall" textAlign="center">
                   {podcast.name}
               </Heading>
+              <Paragraph size="small" margin="medium" textAlign="center">
+              {podcast.description.replace(/(<([^>]+)>)/gi, "")}
+              </Paragraph>
           </Box>
       </Box>
 

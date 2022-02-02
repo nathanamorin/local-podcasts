@@ -142,9 +142,6 @@ export class Index extends React.Component {
               <Paragraph size="small" margin="medium" textAlign="center">
               Latest: {podcast.latest_episode.name} {(new Date(podcast.latest_episode.publish_timestamp * 1000)).toLocaleDateString()}
               </Paragraph>
-              <Paragraph size="small" margin="medium" textAlign="center">
-              {podcast.description.replace(/(<([^>]+)>)/gi, "")}
-              </Paragraph>
           </Box>
       </Box>
       </Link>
