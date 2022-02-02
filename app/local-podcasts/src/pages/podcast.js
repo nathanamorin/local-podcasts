@@ -60,16 +60,24 @@ export function Podcast () {
       <Box fill="horizontal">
           <List data={episodes} paginate={false} pad="small">
           {(episode) => (
-            <Box align="center" justify="start" fill="horizontal" direction="row-responsive">
-              <Link to="/podcast/play"
-                  state={{ podcast: podcast, episode: episode}}  
-              >
-                  <Button icon={<Play />} />
-              </Link>
+            <Box align="center" justify="between" fill="horizontal" direction="row-responsive">
               
+              <Box align="center" justify="start" direction="row" >
+              <Box align="start" justify="start" fill="vertical" direction="column" >
+                <Link to="/podcast/play" state={{ podcast: podcast, episode: episode}}  >
+                      <Button icon={<Play />} />
+                  </Link>
+              </Box>
               <Box align="start" justify="start" direction="column" >
                   <Text>
                       {episode.name}
+                  </Text>
+                </Box>
+              </Box>
+
+              <Box align="end" justify="end" direction="column" >
+                  <Text>
+                      {(new Date(episode.publish_timestamp * 1000)).toLocaleDateString()}
                   </Text>
               </Box>
             </Box>

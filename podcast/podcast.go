@@ -26,8 +26,8 @@ type Episode struct {
 	Id               string `json:"id"`
 	Description      string `json:"description"`
 	AudioFile        string `json:"audio_file"`
-	Length           int64
-	PublishTimestamp int64
+	Length           int64  `json:"length"`
+	PublishTimestamp int64  `json:"publish_timestamp"`
 }
 
 type Podcast struct {
