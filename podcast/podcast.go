@@ -38,7 +38,7 @@ type Podcast struct {
 	episodesMap       map[string]*Episode
 	Episodes          []*Episode `json:"episodes,omitempty"`
 	RSSUrl            string     `json:"rss_url"`
-	DisableAutoUpdate bool       `json:"auto_update"`
+	DisableAutoUpdate bool       `json:"disable_auto_update,omitempty"`
 }
 
 type Config struct {
@@ -46,12 +46,12 @@ type Config struct {
 }
 
 type PodcastWatcher struct {
-	podcastsToUpdate chan *Podcast
+	podcastsToUpdate chan Podcast
 }
 
 func NewPodcastWatcher() PodcastWatcher {
 	return PodcastWatcher{
-		podcastsToUpdate: make(chan *Podcast, 500),
+		podcastsToUpdate: make(chan Podcast, 500),
 	}
 }
 
@@ -70,7 +70,8 @@ func (pw PodcastWatcher) Stop() {
 	close(pw.podcastsToUpdate)
 }
 
-func (pw PodcastWatcher) EnqueuePodcast(podcast *Podcast) {
+func (pw PodcastWatcher) EnqueuePodcast(podcast Podcast) {
+	klog.Infof("enqueued podcast %s for update", podcast.Name)
 	pw.podcastsToUpdate <- podcast
 }
 
@@ -80,7 +81,7 @@ func NewPodcastObj() Podcast {
 	}
 }
 
-func (p Podcast) readCurrentFeed() (string, error) {
+func (p *Podcast) readCurrentFeed() (string, error) {
 	resp, err := http.Get(p.RSSUrl)
 	if err != nil {
 		return "", fmt.Errorf("error making get request %s: %s", p.RSSUrl, err)
@@ -151,7 +152,7 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 
 }
 
-func (p Podcast) GetImage(config Config) ([]byte, string, error) {
+func (p *Podcast) GetImage(config Config) ([]byte, string, error) {
 	filePath := filepath.Join(config.FileHome, p.Id, p.ImageFile)
 	imageFile, err := os.Open(filePath)
 	if err != nil {
@@ -168,7 +169,7 @@ func (p Podcast) GetImage(config Config) ([]byte, string, error) {
 	return byteValue, mime.TypeByExtension(filepath.Ext(p.ImageFile)), nil
 }
 
-func (p Podcast) GetAudioFile(config Config, episodeId string) (string, error) {
+func (p *Podcast) GetAudioFile(config Config, episodeId string) (string, error) {
 	episode, ok := p.episodesMap[episodeId]
 	if !ok {
 		return "", fmt.Errorf("episode id (%s) not found", episodeId)
@@ -183,7 +184,7 @@ func (p Podcast) GetAudioFile(config Config, episodeId string) (string, error) {
 	return filePath, nil
 }
 
-func (p Podcast) mergeNewInfo(newPodcast *Podcast) {
+func (p *Podcast) mergeNewInfo(newPodcast *Podcast) {
 	p.Id = newPodcast.Id
 	p.Name = newPodcast.Name
 	p.ImageFile = newPodcast.ImageFile
@@ -208,7 +209,7 @@ func AddPodcast(config Config, RSSUrl string) (*Podcast, error) {
 	return newPodcastInfo, nil
 }
 
-func (p Podcast) checkPodcastDirExists(config Config) error {
+func (p *Podcast) checkPodcastDirExists(config Config) error {
 	podcastDir := filepath.Join(config.FileHome, p.Id)
 	if _, err := os.Stat(podcastDir); errors.Is(err, os.ErrNotExist) {
 		err := os.Mkdir(podcastDir, 0764)
@@ -220,13 +221,9 @@ func (p Podcast) checkPodcastDirExists(config Config) error {
 	return nil
 }
 
-func (p Podcast) Update(config Config) error {
+func (p *Podcast) syncNewData(feedData string) error {
 
-	feedData, err := p.readCurrentFeed()
-	if err != nil {
-		return fmt.Errorf("error reading podcast rss in update: %s", err)
-	}
-
+	currentNumPodcasts := len(p.Episodes)
 	newPodcastInfo, err := parsePodcastRss(feedData, p.RSSUrl)
 
 	if err != nil {
@@ -254,24 +251,44 @@ func (p Podcast) Update(config Config) error {
 		}
 	}
 
+	p.Episodes = make([]*Episode, 0)
+
+	for _, v := range p.episodesMap {
+		p.Episodes = append(p.Episodes, v)
+	}
+
+	newNumPodcasts := len(p.Episodes)
+
+	klog.Infof("discovered %d new episodes of podcast %s", newNumPodcasts-currentNumPodcasts, p.Name)
+
+	return nil
+}
+
+func (p *Podcast) Update(config Config) error {
+
+	klog.Infof("updating podcast: %s", p.Name)
+
+	feedData, err := p.readCurrentFeed()
+	if err != nil {
+		return fmt.Errorf("error reading podcast rss in update: %s", err)
+	}
+
+	err = p.syncNewData(feedData)
+
+	if err != nil {
+		return fmt.Errorf("error syncing new data into existing podcast data: %s", err)
+	}
+
 	if err := p.checkPodcastDirExists(config); err != nil {
 		return err
 	}
 
-	for id, _ := range p.episodesMap {
-		err := p.SaveEpisode(config, p.episodesMap[id])
+	for _, ep := range p.Episodes {
+		err := p.SaveEpisode(config, ep)
 		if err != nil {
 			return err
 		}
 	}
-
-	newEpisodes := make([]*Episode, 0)
-
-	for _, v := range p.episodesMap {
-		newEpisodes = append(newEpisodes, v)
-	}
-
-	p.Episodes = newEpisodes
 
 	err = p.SaveInfo(config)
 	if err != nil {
@@ -280,7 +297,7 @@ func (p Podcast) Update(config Config) error {
 	return nil
 }
 
-func (p Podcast) SaveEpisode(config Config, episode *Episode) error {
+func (p *Podcast) SaveEpisode(config Config, episode *Episode) error {
 
 	if !strings.HasPrefix(episode.AudioFile, "http") {
 		return nil
@@ -329,7 +346,7 @@ func (p Podcast) SaveEpisode(config Config, episode *Episode) error {
 	return nil
 }
 
-func (p Podcast) SaveInfo(config Config) error {
+func (p *Podcast) SaveInfo(config Config) error {
 
 	if err := p.checkPodcastDirExists(config); err != nil {
 		return err
@@ -371,7 +388,7 @@ func (p Podcast) SaveInfo(config Config) error {
 	return nil
 }
 
-func (p Podcast) fillEpisodeMap() {
+func (p *Podcast) fillEpisodeMap() {
 	if p.episodesMap == nil {
 		p.episodesMap = make(map[string]*Episode)
 	}
@@ -412,7 +429,7 @@ func GetPodcast(config Config, id string) (*Podcast, error) {
 
 }
 
-func ListPodcasts(config Config) ([]Podcast, error) {
+func ListPodcasts(config Config, includeEpisodes bool) ([]Podcast, error) {
 	files, err := ioutil.ReadDir(config.FileHome)
 
 	if err != nil {
@@ -424,7 +441,11 @@ func ListPodcasts(config Config) ([]Podcast, error) {
 	for _, fileInfo := range files {
 		if fileInfo.IsDir() {
 			podcast, err := GetPodcast(config, fileInfo.Name())
-			podcast.Episodes = nil
+			if includeEpisodes {
+				podcast.fillEpisodeMap()
+			} else {
+				podcast.Episodes = nil
+			}
 			if err != nil {
 				return nil, err
 			}

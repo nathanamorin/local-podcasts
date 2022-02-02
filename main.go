@@ -37,27 +37,17 @@ func main() {
 	klog.Infof("started podcast watcher")
 	defer pw.Stop()
 
-	podcasts, err := podcast.ListPodcasts(config)
-
-	if err != nil {
-		klog.Errorf("error listing podcasts on start: %s", err)
-	} else {
-		for _, p := range podcasts {
-			pw.EnqueuePodcast(&p)
-		}
-	}
-
 	s := gocron.NewScheduler(time.UTC)
 
-	_, err = s.Every(1).Hour().Do(func() {
+	_, err := s.Every(1).Hour().Do(func() {
 
-		podcasts, err := podcast.ListPodcasts(config)
+		podcasts, err := podcast.ListPodcasts(config, true)
 
 		if err != nil {
 			klog.Errorf("error listing podcasts on refresh: %s", err)
 		} else {
 			for _, p := range podcasts {
-				pw.EnqueuePodcast(&p)
+				pw.EnqueuePodcast(p)
 			}
 		}
 
@@ -74,7 +64,7 @@ func main() {
 	}
 	e.GET("/podcasts", func(c echo.Context) error {
 
-		podcasts, err := podcast.ListPodcasts(config)
+		podcasts, err := podcast.ListPodcasts(config, false)
 
 		if err != nil {
 			klog.Errorf("error listing podcasts: %s", err)
@@ -102,7 +92,7 @@ func main() {
 				return c.String(http.StatusBadRequest, "{\"error\": \"error processing podcast rss url\"}")
 			}
 
-			pw.EnqueuePodcast(podcastData)
+			pw.EnqueuePodcast(*podcastData)
 
 			return c.JSON(http.StatusOK, podcastData)
 
