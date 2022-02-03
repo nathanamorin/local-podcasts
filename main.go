@@ -41,6 +41,10 @@ func main() {
 
 	_, err := s.Every(1).Hour().Do(func() {
 
+		if !pw.QueueEmpty() {
+			klog.Infof("podcasts still in update queue, skipping cron update")
+		}
+
 		podcasts, err := podcast.ListPodcasts(config, true)
 
 		if err != nil {

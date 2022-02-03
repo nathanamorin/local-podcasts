@@ -76,6 +76,10 @@ func (pw PodcastWatcher) Stop() {
 	close(pw.podcastsToUpdate)
 }
 
+func (pw PodcastWatcher) QueueEmpty() bool {
+	return len(pw.podcastsToUpdate) == 0
+}
+
 func (pw PodcastWatcher) EnqueuePodcast(podcast Podcast) {
 	klog.Infof("enqueued podcast %s for update", podcast.Name)
 	pw.podcastsToUpdate <- podcast
