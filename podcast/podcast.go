@@ -50,6 +50,8 @@ type PodcastWatcher struct {
 	podcastsToUpdate chan Podcast
 }
 
+const threads = 5
+
 func NewPodcastWatcher() PodcastWatcher {
 	return PodcastWatcher{
 		podcastsToUpdate: make(chan Podcast, 500),
@@ -57,14 +59,17 @@ func NewPodcastWatcher() PodcastWatcher {
 }
 
 func (pw PodcastWatcher) Run(config Config) {
-	go func() {
-		for podcastToUpdate := range pw.podcastsToUpdate {
-			err := podcastToUpdate.Update(config)
-			if err != nil {
-				klog.Errorf("error updating podcast (%s): %s", podcastToUpdate.Name, err)
+
+	for i := 0; i < threads; i++ {
+		go func() {
+			for podcastToUpdate := range pw.podcastsToUpdate {
+				err := podcastToUpdate.Update(config)
+				if err != nil {
+					klog.Errorf("error updating podcast (%s): %s", podcastToUpdate.Name, err)
+				}
 			}
-		}
-	}()
+		}()
+	}
 }
 
 func (pw PodcastWatcher) Stop() {
@@ -287,14 +292,15 @@ func (p *Podcast) Update(config Config) error {
 	for _, ep := range p.Episodes {
 		err := p.SaveEpisode(config, ep)
 		if err != nil {
-			return err
+			return fmt.Errorf("error saving episode: %s", err)
 		}
+		err = p.SaveInfo(config)
+		if err != nil {
+			return fmt.Errorf("error saving info after saving episode: %s", err)
+		}
+
 	}
 
-	err = p.SaveInfo(config)
-	if err != nil {
-		return fmt.Errorf("error saving info after update: %s", err)
-	}
 	return nil
 }
 
