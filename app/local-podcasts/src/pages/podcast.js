@@ -1,24 +1,13 @@
 import React, { useState, useEffect } from 'react'
-import { Grommet,Box, List, Button, Text, Heading, Paragraph } from 'grommet'
+import { Grommet,Box, List, Button, Text, Heading, Paragraph, TextInput } from 'grommet'
 import { Play } from 'grommet-icons'
-import { Link, useLocation } from "react-router-dom";
-const theme = {
-    "global": {
-      "colors": {
-        "background": {
-          "light": "#ffffff",
-          "dark": "#000000"
-        }
-      },
-      "font": {
-        "family": "-apple-system,\n         BlinkMacSystemFont, \n         \"Segoe UI\", \n         Roboto, \n         Oxygen, \n         Ubuntu, \n         Cantarell, \n         \"Fira Sans\", \n         \"Droid Sans\",  \n         \"Helvetica Neue\", \n         Arial, sans-serif,  \n         \"Apple Color Emoji\", \n         \"Segoe UI Emoji\", \n         \"Segoe UI Symbol\""
-      }
-    },
-    "button": {
-      "extend": [
-        null
-      ]
-    }
+import { Link, useLocation } from "react-router-dom"
+import Fuse from 'fuse.js'
+import {theme} from './theme'
+
+  const searchOptions = {
+    includeScore: false,
+    keys: ['name', 'description']
   }
 
 
@@ -26,7 +15,9 @@ export function Podcast () {
     const location = useLocation()
     const podcast = location.state.podcast
 
-    const [episodes, setEpisodes] = useState([])
+    const [episodes, setEpisodes] = useState(new Fuse([], searchOptions))
+
+    const [searchText, setSearchText] = useState("")
 
     useEffect(() => {
         fetch(`/podcasts/${podcast.id}`)
@@ -34,14 +25,22 @@ export function Podcast () {
             return data.json()
           })
           .then(data => {
-            setEpisodes(data.episodes)
+            setEpisodes(new Fuse(data.episodes, searchOptions))
           })
           .catch(err => {
             console.log(err)
           })
       }, [])
 
-    console.log(podcast)
+
+    let searchedEpisodes;
+    if (searchText !== "") {
+      searchedEpisodes = episodes.search(searchText);
+    } else {
+      searchedEpisodes = episodes.getIndex().docs.map((item) => ({item, matches: [], score: 1}));
+    }
+
+    searchedEpisodes = searchedEpisodes.map(x => x.item)
 
 
     return (
@@ -59,9 +58,15 @@ export function Podcast () {
               </Paragraph>
           </Box>
       </Box>
+      <TextInput
+          placeholder="Search"
+          value={searchText}
+          onChange={event => setSearchText(event.target.value)}
+          focusIndicator={false}
+        />
 
       <Box fill="horizontal">
-          <List data={episodes} paginate={false} pad="small">
+          <List data={searchedEpisodes} paginate={false} pad="small">
           {(episode) => (
             <Box align="center" justify="between" fill="horizontal" direction="row-responsive">
               
