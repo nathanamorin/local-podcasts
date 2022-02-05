@@ -38,7 +38,7 @@ spec:
       containers:
         - name: local-podcasts
           # Check packages in github for latest version
-          image: ghcr.io/nathanamorin/local-podcasts:sha-792cbc8
+          image: ghcr.io/nathanamorin/local-podcasts:<latest release tag here>
           volumeMounts:
             - name: data-volume
               mountPath: /data
