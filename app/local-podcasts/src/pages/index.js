@@ -43,6 +43,7 @@ export function Index() {
             placeholder="Search"
             value={searchText}
             onChange={event => setSearchText(event.target.value)}
+            outline="none"
           />
           <Link to="/podcast/add">
             <Button icon={<AddCircle />} margin="small" />
@@ -55,7 +56,7 @@ export function Index() {
               state={{ podcast: podcast }}
               style={{ textDecoration: 'none' }}
             >
-              <Box align="center" pad="small" background={cardBackground} round="medium" elevation="xlarge" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
+              <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
                 <Box align="center" justify="center" pad="xsmall" margin="xsmall">
                   <Box align="center" justify="center" background={{ "dark": false, "color": "light-2", "image": `url('/podcasts/${podcast.id}/image')` }} round="xsmall" margin="medium" fill="vertical" pad="xlarge" />
                   <Heading level="2" size="medium" margin="xsmall" textAlign="center" >
