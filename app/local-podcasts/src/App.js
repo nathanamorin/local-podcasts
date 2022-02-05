@@ -21,7 +21,6 @@ function App() {
           <Route path="/podcast/add" element={<AddPodcast />}/>
         </Routes>
       </Router>
-
   )
 }
 
