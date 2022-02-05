@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Grommet, Box, List, Button, Text, Heading, Paragraph, TextInput } from 'grommet'
-import { Play } from 'grommet-icons'
-import { Link, useLocation } from "react-router-dom"
+import { Play, Previous } from 'grommet-icons'
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import Fuse from 'fuse.js'
 import { theme, background, cardBackground } from './theme'
 
@@ -13,6 +13,7 @@ const searchOptions = {
 
 export function Podcast() {
   const location = useLocation()
+  const navigate = useNavigate()
   const podcast = location.state.podcast
 
   const [episodes, setEpisodes] = useState(new Fuse([], searchOptions))
@@ -46,7 +47,9 @@ export function Podcast() {
   return (
     <Grommet full theme={theme}>
       <Box align="center" justify="center" pad="small" background={background} height="xlarge" flex={false} fill="vertical" direction="row" wrap overflow="auto">
-
+      <Box justify="center" align="start" fill="horizontal">
+        <Button onClick={() => navigate(-1)} justify="start" icon={<Previous />}/>
+      </Box>
         <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
           <Box align="center" justify="center" pad="xsmall" margin="xsmall">
             <Box align="center" justify="center" background={{ "dark": false, "color": "light-2", "image": `url('/podcasts/${podcast.id}/image')` }} round="xsmall" margin="medium" fill="vertical" pad="xlarge" />
@@ -67,12 +70,12 @@ export function Podcast() {
 
 
         <Box fill="horizontal" pad={{top: "medium"}}>
-          <List data={searchedEpisodes} paginate={false} pad="small">
+          <List data={searchedEpisodes} paginate={false}>
             {(episode) => (
-              <Box align="center" justify="between" fill="horizontal" direction="row-responsive">
+              <Box align="center" justify="start" fill="horizontal" direction="row-responsive" pad="xxsmall">
 
                 <Box align="center" justify="start" direction="row" >
-                  <Box align="start" justify="start" fill="vertical" direction="column" >
+                  <Box align="start" justify="start" fill="vertical" direction="column" pad="small" >
                     <Link to="/podcast/play" state={{ podcast: podcast, episode: episode }}  >
                       <Button icon={<Play />} />
                     </Link>

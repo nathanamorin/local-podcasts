@@ -55,6 +55,7 @@ export function Index() {
             <Link to="/podcast"
               state={{ podcast: podcast }}
               style={{ textDecoration: 'none' }}
+              key={podcast.id}
             >
               <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
                 <Box align="center" justify="center" pad="xsmall" margin="xsmall">

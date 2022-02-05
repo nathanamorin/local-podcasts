@@ -1,7 +1,7 @@
 import React from 'react'
-import { useLocation } from 'react-router-dom'
-import { Grommet, Box, Heading, Paragraph } from 'grommet'
-
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Grommet, Box, Heading, Paragraph, Button } from 'grommet'
+import { Previous } from 'grommet-icons'
 import AudioPlayer from 'react-h5-audio-player'
 import './custom-player.scss'
 import { theme, background, cardBackground } from '../theme'
@@ -9,6 +9,7 @@ import { theme, background, cardBackground } from '../theme'
 
 export function PlayPodcast() {
   const location = useLocation()
+  const navigate = useNavigate()
 
   let podcast = null
   let episode = null
@@ -44,7 +45,9 @@ export function PlayPodcast() {
 
     <Grommet full theme={theme}>
       <Box align="start" justify="center" pad="small" background={background} height="xlarge" flex={false} fill="vertical" direction="row" wrap overflow="auto">
-
+        <Box justify="center" align="start" fill="horizontal">
+          <Button onClick={() => navigate(-1)} justify="start" icon={<Previous />}/>
+        </Box>
         <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
           <Box align="center" justify="center" pad="xsmall" margin="xsmall">
             <Box align="center" justify="center" background={{ "dark": false, "color": "light-2", "image": `url('/podcasts/${podcast.id}/image')` }} round="xsmall" margin="medium" fill="vertical" pad="xlarge" />
