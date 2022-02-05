@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const podcastInfoFilename = "info.json"
@@ -47,40 +48,73 @@ type Config struct {
 }
 
 type PodcastWatcher struct {
-	podcastsToUpdate chan Podcast
+	podcastsToUpdate     chan Podcast
+	currentDownloads     map[string]int
+	currentDownloadsLock sync.RWMutex
 }
 
 const threads = 5
 
 func NewPodcastWatcher() PodcastWatcher {
 	return PodcastWatcher{
-		podcastsToUpdate: make(chan Podcast, 500),
+		podcastsToUpdate:     make(chan Podcast, 500),
+		currentDownloads:     make(map[string]int),
+		currentDownloadsLock: sync.RWMutex{},
 	}
 }
 
-func (pw PodcastWatcher) Run(config Config) {
+// RegisterUpdating returns if podcast is already updating
+func (pw *PodcastWatcher) RegisterUpdating(podcast Podcast, threadIdx int) bool {
+	pw.currentDownloadsLock.Lock()
+	defer pw.currentDownloadsLock.Unlock()
+
+	if _, ok := pw.currentDownloads[podcast.Id]; ok {
+		return true
+	} else {
+		pw.currentDownloads[podcast.Id] = threadIdx
+		return false
+	}
+}
+
+func (pw *PodcastWatcher) UnRegisterUpdating(podcast Podcast) {
+	pw.currentDownloadsLock.Lock()
+	defer pw.currentDownloadsLock.Unlock()
+
+	delete(pw.currentDownloads, podcast.Id)
+}
+
+func (pw *PodcastWatcher) Run(config Config) {
 
 	for i := 0; i < threads; i++ {
 		go func() {
 			for podcastToUpdate := range pw.podcastsToUpdate {
-				err := podcastToUpdate.Update(config)
-				if err != nil {
-					klog.Errorf("error updating podcast (%s): %s", podcastToUpdate.Name, err)
-				}
+				func() {
+					isAlreadyUpdating := pw.RegisterUpdating(podcastToUpdate, i)
+					defer pw.UnRegisterUpdating(podcastToUpdate)
+
+					if isAlreadyUpdating {
+						klog.Infof("already updating podcast (%s), skipping", podcastToUpdate.Name)
+						return
+					}
+					err := podcastToUpdate.Update(config)
+					if err != nil {
+						klog.Errorf("error updating podcast (%s): %s", podcastToUpdate.Name, err)
+					}
+				}()
 			}
 		}()
 	}
 }
 
-func (pw PodcastWatcher) Stop() {
+func (pw *PodcastWatcher) Stop() {
 	close(pw.podcastsToUpdate)
 }
 
-func (pw PodcastWatcher) QueueEmpty() bool {
+func (pw *PodcastWatcher) QueueEmpty() bool {
 	return len(pw.podcastsToUpdate) == 0
 }
 
-func (pw PodcastWatcher) EnqueuePodcast(podcast Podcast) {
+func (pw *PodcastWatcher) EnqueuePodcast(podcast Podcast) {
 	klog.Infof("enqueued podcast %s for update", podcast.Name)
 	pw.podcastsToUpdate <- podcast
 }
