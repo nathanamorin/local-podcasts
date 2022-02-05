@@ -47,7 +47,7 @@ export function Podcast() {
     <Grommet full theme={theme}>
       <Box align="center" justify="center" pad="small" background={background} height="xlarge" flex={false} fill="vertical" direction="row" wrap overflow="auto">
 
-        <Box align="center" pad="small" background={cardBackground} round="medium" elevation="xlarge" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
+        <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
           <Box align="center" justify="center" pad="xsmall" margin="xsmall">
             <Box align="center" justify="center" background={{ "dark": false, "color": "light-2", "image": `url('/podcasts/${podcast.id}/image')` }} round="xsmall" margin="medium" fill="vertical" pad="xlarge" />
             <Heading level="2" size="medium" margin="xsmall" textAlign="center">
@@ -65,7 +65,8 @@ export function Podcast() {
           focusIndicator={false}
         />
 
-        <Box fill="horizontal">
+
+        <Box fill="horizontal" pad={{top: "medium"}}>
           <List data={searchedEpisodes} paginate={false} pad="small">
             {(episode) => (
               <Box align="center" justify="between" fill="horizontal" direction="row-responsive">
