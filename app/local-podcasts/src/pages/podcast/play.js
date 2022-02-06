@@ -1,15 +1,35 @@
-import React from 'react'
+import { createRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Grommet, Box, Heading, Paragraph, Button } from 'grommet'
 import { Previous } from 'grommet-icons'
 import AudioPlayer from 'react-h5-audio-player'
 import './custom-player.scss'
 import { theme, background, cardBackground } from '../theme'
+import { useKeyPress } from '../utils'
 
 
 export function PlayPodcast() {
   const location = useLocation()
   const navigate = useNavigate()
+  const player = createRef()
+
+  useKeyPress("Space", () => {
+      const controlls = player.current.audio.current
+      if (controlls.paused) {
+        controlls.play()
+      } else {
+        controlls.pause()
+      }
+  })
+
+  useKeyPress("ArrowRight", () => {
+    const controlls = player.current
+    console.log(controlls.handleClickForward())
+  })
+  useKeyPress("ArrowLeft", () => {
+    const controlls = player.current
+    console.log(controlls.handleClickRewind())
+  })
 
   let podcast = null
   let episode = null
@@ -65,16 +85,17 @@ export function PlayPodcast() {
 
         <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }} justify="end" fill="horizontal">
           <AudioPlayer
-            autoPlay
-            src={`/podcasts/${podcast.id}/episodes/${episode.id}/stream`}
-            onListen={e => {
-              localStorage.setItem(`${podcast.id}/${episode.id}`, e.target.currentTime)
-            }}
-            onLoadedMetaData={e => {
-              e.target.currentTime = startTime
-            }}
-            customAdditionalControls={[]}
-          />
+              autoPlay
+              src={`/podcasts/${podcast.id}/episodes/${episode.id}/stream`}
+              onListen={e => {
+                localStorage.setItem(`${podcast.id}/${episode.id}`, e.target.currentTime)
+              }}
+              onLoadedMetaData={e => {
+                e.target.currentTime = startTime
+              }}
+              customAdditionalControls={[]}
+              ref={player}
+            />
         </Box>
 
       </Box>
