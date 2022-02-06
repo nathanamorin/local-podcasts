@@ -4,12 +4,12 @@ A fully self hosted podcast manager.  Download & save the full history of a podc
 
 # Installation
 
-## With Docker
+## Docker
 ```bash
 docker run -p 8080:8080 -v <path to podcast storage directory>:/data ghcr.io/nathanamorin/local-podcasts:<latest release tag here>
 ```
 
-## With Kubernetes
+## Kubernetes
 Modify the included Kuberntes manifests ```deployment/deployment.yaml``` to match your environment.
 ```bash
 kubectl apply -f deployment/deployment.yaml
