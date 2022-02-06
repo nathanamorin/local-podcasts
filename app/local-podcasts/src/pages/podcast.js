@@ -72,7 +72,7 @@ export function Podcast() {
         <Box fill="horizontal" pad={{top: "medium"}}>
           <List data={searchedEpisodes} paginate={false}>
             {(episode) => (
-              <Box align="center" justify="start" fill="horizontal" direction="row-responsive" pad="xxsmall">
+              <Box align="center" justify="between" fill="horizontal" direction="row-responsive" pad="xxsmall">
 
                 <Box align="center" justify="start" direction="row" >
                   <Box align="start" justify="start" fill="vertical" direction="column" pad="small" >
