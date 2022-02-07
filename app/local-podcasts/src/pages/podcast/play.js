@@ -94,6 +94,7 @@ export function PlayPodcast() {
                 e.target.currentTime = startTime
               }}
               customAdditionalControls={[]}
+              hasDefaultKeyBindings={false}
               ref={player}
             />
         </Box>
