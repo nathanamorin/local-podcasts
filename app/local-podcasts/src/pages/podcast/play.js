@@ -1,4 +1,4 @@
-import { createRef } from 'react'
+import { createRef, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Grommet, Box, Heading, Paragraph, Button } from 'grommet'
 import { Previous } from 'grommet-icons'
@@ -13,6 +13,7 @@ export function PlayPodcast() {
   const navigate = useNavigate()
   const player = createRef()
 
+
   useKeyPress("Space", () => {
       const controlls = player.current.audio.current
       if (controlls.paused) {
@@ -23,12 +24,10 @@ export function PlayPodcast() {
   })
 
   useKeyPress("ArrowRight", () => {
-    const controlls = player.current
-    console.log(controlls.handleClickForward())
+    player.current.handleClickForward()
   })
   useKeyPress("ArrowLeft", () => {
-    const controlls = player.current
-    console.log(controlls.handleClickRewind())
+    player.current.handleClickRewind()
   })
 
   let podcast = null
@@ -43,7 +42,6 @@ export function PlayPodcast() {
 
         if (episode === null || podcast === null) {
           window.location.href = "/"
-          return
         }
 
         episode = JSON.parse(episode)
@@ -55,11 +53,13 @@ export function PlayPodcast() {
     localStorage.setItem('currentPodcast', JSON.stringify(podcast))
   }
 
+  const startTime = localStorage.getItem(`${podcast.id}/${episode.id}`)
 
-  let startTime = localStorage.getItem(`${podcast.id}/${episode.id}`)
-  if (startTime === undefined) {
-    startTime = 0
-  }
+  useEffect(() => {
+      if (startTime !== undefined) {
+        player.current.audio.current.currentTime = startTime
+      }
+  }, []);
 
   return (
 
@@ -88,10 +88,13 @@ export function PlayPodcast() {
               autoPlay
               src={`/podcasts/${podcast.id}/episodes/${episode.id}/stream`}
               onListen={e => {
+                // For some reason, this is called with a empty audio element 
+                // when navigation is triggered, do some quick checks to prevent setting
+                // a play time when this happens
+                if (e.target.src === undefined || e.target.src === "") {
+                  return
+                }
                 localStorage.setItem(`${podcast.id}/${episode.id}`, e.target.currentTime)
-              }}
-              onLoadedMetaData={e => {
-                e.target.currentTime = startTime
               }}
               customAdditionalControls={[]}
               hasDefaultKeyBindings={false}
