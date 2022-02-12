@@ -75,6 +75,36 @@ export function PlayPodcast() {
     </Grommet>
   }
 
+  function setMediaMetadata() {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new window.MediaMetadata({
+        title: episode.name,
+        artist: podcast.name,
+        artwork: [
+          { src: `/podcasts/${podcast.id}/image` }
+        ]
+      })
+      navigator.mediaSession.setActionHandler('play', () => {
+        player.current.audio.current.play()
+      })
+      navigator.mediaSession.setActionHandler('pause', () => {
+        player.current.audio.current.pause()
+      })
+      navigator.mediaSession.setActionHandler('seekbackward', () => {
+        player.current.handleClickRewind()
+      })
+      navigator.mediaSession.setActionHandler('seekforward', () => {
+        player.current.handleClickForward()
+      })
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        player.current.handleClickRewind()
+      })
+      navigator.mediaSession.setActionHandler('nexttrack', () => {
+        player.current.handleClickForward()
+      })
+    }
+  }
+
   return (
 
     <Grommet full theme={theme}>
@@ -126,31 +156,11 @@ export function PlayPodcast() {
                   player.current.audio.current.currentTime = startTime
                 }
 
+                setMediaMetadata()
+
               }}
               onPlay={e => {
-                if ('mediaSession' in navigator) {
-
-                  navigator.mediaSession.metadata = new window.MediaMetadata({
-                    title: episode.name,
-                    artist: podcast.name,
-                    artwork: [
-                      { src: `/podcasts/${podcast.id}/image` }
-                    ]
-                  })
-                  navigator.mediaSession.setActionHandler('play', () => {
-                    player.current.audio.current.play()
-                  })
-                  navigator.mediaSession.setActionHandler('pause',() => {
-                    player.current.audio.current.pause()
-                  })
-                  navigator.mediaSession.setActionHandler('seekbackward', () => {
-                    console.log("skip")
-                    player.current.handleClickRewind()
-                  })
-                  navigator.mediaSession.setActionHandler('seekforward', () => {
-                    player.current.handleClickForward()
-                  })
-                }
+                setMediaMetadata()
               }}
               onEnded={e => {
                 if (!autoPlay) {
