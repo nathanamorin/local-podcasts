@@ -63,7 +63,10 @@ export function PlayPodcast() {
 
     setEpisode(newEpisode)
     setPodcast(newPodcast)
+
+
   }, [])
+
 
 
   if (episode === null || podcast === null) {
@@ -116,10 +119,37 @@ export function PlayPodcast() {
                 localStorage.setItem(`${podcast.id}/${episode.id}`, e.target.currentTime)
               }}
               onLoadedMetaData={e => {
+                // Check saved play point
                 const startTime = localStorage.getItem(`${podcast.id}/${episode.id}`)
 
                 if (startTime !== undefined) {
                   player.current.audio.current.currentTime = startTime
+                }
+
+              }}
+              onPlay={e => {
+                if ('mediaSession' in navigator) {
+
+                  navigator.mediaSession.metadata = new window.MediaMetadata({
+                    title: episode.name,
+                    artist: podcast.name,
+                    artwork: [
+                      { src: `/podcasts/${podcast.id}/image` }
+                    ]
+                  })
+                  navigator.mediaSession.setActionHandler('play', () => {
+                    player.current.audio.current.play()
+                  })
+                  navigator.mediaSession.setActionHandler('pause',() => {
+                    player.current.audio.current.pause()
+                  })
+                  navigator.mediaSession.setActionHandler('seekbackward', () => {
+                    console.log("skip")
+                    player.current.handleClickRewind()
+                  })
+                  navigator.mediaSession.setActionHandler('seekforward', () => {
+                    player.current.handleClickForward()
+                  })
                 }
               }}
               onEnded={e => {
