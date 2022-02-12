@@ -1,8 +1,9 @@
-import { createRef, useEffect } from 'react'
+import { createRef, useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Grommet, Box, Heading, Paragraph, Button } from 'grommet'
+import { Grommet, Box, Heading, Paragraph, Button, Text } from 'grommet'
 import { Previous } from 'grommet-icons'
 import AudioPlayer from 'react-h5-audio-player'
+import Switch from "react-switch";
 import './custom-player.scss'
 import { theme, background, cardBackground } from '../theme'
 import { useKeyPress } from '../utils'
@@ -30,43 +31,61 @@ export function PlayPodcast() {
     player.current.handleClickRewind()
   })
 
-  let podcast = null
-  let episode = null
-
-  // Check if state exists
-  if (location.state === null 
-      || location.state.episode === null 
-      || location.state.podcast === null) {
-        episode = localStorage.getItem('currentEpisode')
-        podcast = localStorage.getItem('currentPodcast')
-
-        if (episode === null || podcast === null) {
-          window.location.href = "/"
-        }
-
-        episode = JSON.parse(episode)
-        podcast = JSON.parse(podcast)
-  } else {
-    podcast = location.state.podcast
-    episode = location.state.episode
-    localStorage.setItem('currentEpisode', JSON.stringify(episode))
-    localStorage.setItem('currentPodcast', JSON.stringify(podcast))
-  }
-
-  const startTime = localStorage.getItem(`${podcast.id}/${episode.id}`)
+  const [episode, setEpisode] = useState(null)
+  const [podcast, setPodcast] = useState(null)
+  const [episodes, setEpisodes] = useState([])
+  const [autoPlay, setAutoPlay] = useState(false)
 
   useEffect(() => {
-      if (startTime !== undefined) {
-        player.current.audio.current.currentTime = startTime
-      }
-  }, []);
+      let newEpisode = null
+      let newPodcast = null
+      // Check if state exists
+      if (location.state === null 
+        || location.state.episode === null 
+        || location.state.podcast === null) {
+          const epFromStorage = localStorage.getItem('currentEpisode')
+          const podcastFromStorage = localStorage.getItem('currentPodcast')
+
+          if (epFromStorage === null || podcastFromStorage === null) {
+            window.location.href = "/"
+          }
+
+          newEpisode = JSON.parse(epFromStorage)
+          newPodcast = JSON.parse(podcastFromStorage)
+    } else {
+      newPodcast = location.state.podcast
+      newEpisode = location.state.episode
+      setEpisodes(location.state.episodes)
+      localStorage.setItem('currentEpisode', JSON.stringify(newEpisode))
+      localStorage.setItem('currentPodcast', JSON.stringify(newPodcast))
+    }
+
+
+    setEpisode(newEpisode)
+    setPodcast(newPodcast)
+  }, [])
+
+
+  if (episode === null || podcast === null) {
+    return <Grommet full theme={theme}>
+      <Box align="start" justify="center" pad="small" background={background} height="xlarge" flex={false} fill="vertical" direction="row" wrap overflow="auto"/>
+    </Grommet>
+  }
 
   return (
 
     <Grommet full theme={theme}>
       <Box align="start" justify="center" pad="small" background={background} height="xlarge" flex={false} fill="vertical" direction="row" wrap overflow="auto">
-        <Box justify="center" align="start" fill="horizontal">
+        <Box justify="center" align="start" justify="between" fill="horizontal" direction="row">
           <Button onClick={() => navigate(-1)} justify="start" icon={<Previous />}/>
+          <Box justify="end" pad="medium" direction="row">
+            <Text margin={{"right": "small"}}>
+              AutoPlay
+            </Text>
+            <Switch justify="end"  onChange={e => {
+                setAutoPlay(e)
+            }} checked={autoPlay} activeBoxShadow="0 0 1px 3px grey"/>
+          </Box>
         </Box>
         <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
           <Box align="center" justify="center" pad="xsmall" margin="xsmall">
@@ -95,6 +114,34 @@ export function PlayPodcast() {
                   return
                 }
                 localStorage.setItem(`${podcast.id}/${episode.id}`, e.target.currentTime)
+              }}
+              onLoadedMetaData={e => {
+                const startTime = localStorage.getItem(`${podcast.id}/${episode.id}`)
+
+                if (startTime !== undefined) {
+                  player.current.audio.current.currentTime = startTime
+                }
+              }}
+              onEnded={e => {
+                if (!autoPlay) {
+                  return
+                }
+                if (episodes.length > 0) {
+                  let idx = 0
+
+                  for (let i=episodes.length-1; i >= 0; i--) {
+                    if (episodes[i].id === episode.id) {
+                      idx = i
+                      break
+                    }
+                  }
+
+                  idx -= 1
+                  if (idx >= 0) {
+                    setEpisode(episodes[idx])
+                    
+                  }
+                }
               }}
               customAdditionalControls={[]}
               hasDefaultKeyBindings={false}

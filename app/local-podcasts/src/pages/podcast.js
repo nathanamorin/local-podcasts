@@ -70,16 +70,16 @@ export function Podcast() {
 
 
         <Box fill="horizontal" pad={{top: "medium"}}>
-          <List data={searchedEpisodes} paginate={false}>
+          <List data={searchedEpisodes} paginate={false} pad="small">
             {(episode) => (
               <Box align="center" justify="between" fill="horizontal" direction="row-responsive" pad="xxsmall">
 
                 <Box align="center" justify="start" direction="row" >
-                  <Box align="start" justify="start" fill="vertical" direction="column" pad="small" >
-                    <Link to="/podcast/play" state={{ podcast: podcast, episode: episode }}  >
-                      <Button icon={<Play />} />
+                  {/* <Box align="start" justify="start" fill="vertical" direction="column" pad="small" > */}
+                    <Link to="/podcast/play" state={{ podcast: podcast, episode: episode, episodes: searchedEpisodes }}  >
+                      <Button icon={<Play />} size="large"/>
                     </Link>
-                  </Box>
+                  {/* </Box> */}
                   <Box align="start" justify="start" direction="column" >
                     <Text>
                       {episode.name}
@@ -87,8 +87,8 @@ export function Podcast() {
                   </Box>
                 </Box>
 
-                <Box align="end" justify="end" direction="column" >
-                  <Text>
+                <Box align="end" justify="end" direction="column">
+                  <Text color="text-weak">
                     {(new Date(episode.publish_timestamp * 1000)).toLocaleDateString()}
                   </Text>
                 </Box>
