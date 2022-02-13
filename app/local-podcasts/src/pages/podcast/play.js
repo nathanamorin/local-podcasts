@@ -1,9 +1,11 @@
-import { createRef, useEffect, useState } from 'react'
+import { createRef, useEffect, useState, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Grommet, Box, Heading, Paragraph, Button, Text } from 'grommet'
-import { Previous } from 'grommet-icons'
+import { Previous, Play, Pause } from 'grommet-icons'
+import { Cast } from 'react-feather';
 import AudioPlayer from 'react-h5-audio-player'
-import Switch from "react-switch";
+import Switch from "react-switch"
+import { useCast, useMedia } from 'react-chromecast'
 import './custom-player.scss'
 import { theme, background, cardBackground } from '../theme'
 import { useKeyPress } from '../utils'
@@ -13,9 +15,17 @@ export function PlayPodcast() {
   const location = useLocation()
   const navigate = useNavigate()
   const player = createRef()
+  const cast = useCast({
+      initialize_media_player: "DEFAULT_MEDIA_RECEIVER_APP_ID",
+      auto_initialize: true,
+  })
+  const chromecastMedia = useMedia()
 
 
   useKeyPress("Space", () => {
+      if (cast.isConnect) {
+        return
+      }
       const controlls = player.current.audio.current
       if (controlls.paused) {
         controlls.play()
@@ -25,9 +35,15 @@ export function PlayPodcast() {
   })
 
   useKeyPress("ArrowRight", () => {
+    if (cast.isConnect) {
+      return
+    }
     player.current.handleClickForward()
   })
   useKeyPress("ArrowLeft", () => {
+    if (cast.isConnect) {
+      return
+    }
     player.current.handleClickRewind()
   })
 
@@ -35,6 +51,7 @@ export function PlayPodcast() {
   const [podcast, setPodcast] = useState(null)
   const [episodes, setEpisodes] = useState([])
   const [autoPlay, setAutoPlay] = useState(false)
+  const [chromecastPlaying, setChromecastPlaying] = useState(false)
 
   useEffect(() => {
       let newEpisode = null
@@ -66,6 +83,35 @@ export function PlayPodcast() {
 
 
   }, [])
+
+
+
+  const handleChromecast = useCallback(async () => {
+      if(cast.castReceiver) {
+          await cast.handleConnection()
+          setChromecastPlaying(false)
+      }
+  }, [cast.castReceiver, cast.handleConnection])
+
+  const playCast = useCallback(async () => {
+    setChromecastPlaying(true)
+    if (chromecastMedia) {
+      if (chromecastMedia.isMedia) {
+        chromecastMedia.play()
+      } else {
+        await chromecastMedia.playMedia(`https://podcasts.apps.dev.nathanmorin.com/podcasts/${podcast.id}/episodes/${episode.id}/stream`)
+      }
+    }
+    setChromecastPlaying(true)
+  }, [chromecastMedia])
+
+  const pauseCast = useCallback(async () => {
+    setChromecastPlaying(false)
+    if (chromecastMedia) {
+      await chromecastMedia.pause()
+    }
+    setChromecastPlaying(false)
+  }, [chromecastMedia])
 
 
 
@@ -105,38 +151,27 @@ export function PlayPodcast() {
     }
   }
 
-  return (
+  let audioPlayer = null
+  let playIcon = null
+  if (chromecastPlaying) {
+    playIcon = <Pause/>
+  } else {
+    playIcon = <Play/>
+  }
 
-    <Grommet full theme={theme}>
-      <Box align="start" justify="center" pad="small" background={background} height="xlarge" flex={false} fill="vertical" direction="row" wrap overflow="auto">
-        <Box justify="center" align="start" justify="between" fill="horizontal" direction="row">
-          <Button onClick={() => navigate(-1)} justify="start" icon={<Previous />}/>
-          <Box justify="end" pad="medium" direction="row">
-            <Text margin={{"right": "small"}}>
-              AutoPlay
-            </Text>
-            <Switch justify="end"  onChange={e => {
-                setAutoPlay(e)
-            }} checked={autoPlay} activeBoxShadow="0 0 1px 3px grey"/>
-          </Box>
-        </Box>
-        <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
-          <Box align="center" justify="center" pad="xsmall" margin="xsmall">
-            <Box align="center" justify="center" background={{ "dark": false, "color": "light-2", "image": `url('/podcasts/${podcast.id}/image')` }} round="xsmall" margin="medium" fill="vertical" pad="xlarge" />
-            <Heading level="2" size="medium" margin="xsmall" textAlign="center">
-              {podcast.name}
-            </Heading>
-            <Heading level="3" size="medium" margin="xsmall" textAlign="center">
-              {episode.name}
-            </Heading>
-            <Paragraph size="small" margin="medium" textAlign="center">
-              {episode.description.replace(/(<([^>]+)>)/gi, "")}
-            </Paragraph>
-          </Box>
-        </Box>
+  if (cast.isConnect) {
+    audioPlayer = <Box>
+      <Button onClick={() => {
+        if (chromecastPlaying) {
+          pauseCast() 
+        } else {
+          playCast()
+        }
+      }} justify="start" icon={playIcon}/>
 
-        <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }} justify="end" fill="horizontal">
-          <AudioPlayer
+    </Box>
+  } else {
+    audioPlayer = <AudioPlayer
               autoPlay
               src={`/podcasts/${podcast.id}/episodes/${episode.id}/stream`}
               onListen={e => {
@@ -163,6 +198,7 @@ export function PlayPodcast() {
                 setMediaMetadata()
               }}
               onEnded={e => {
+                // Handle auto play if enabled
                 if (!autoPlay) {
                   return
                 }
@@ -187,6 +223,44 @@ export function PlayPodcast() {
               hasDefaultKeyBindings={false}
               ref={player}
             />
+  }
+
+
+
+
+  return (
+
+    <Grommet full theme={theme}>
+      <Box align="start" justify="center" pad="small" background={background} height="xlarge" flex={false} fill="vertical" direction="row" wrap overflow="auto">
+        <Box justify="center" align="start" justify="between" fill="horizontal" direction="row">
+          <Button onClick={() => navigate(-1)} justify="start" icon={<Previous />}/>
+          <Box justify="end" pad="medium" direction="row">
+            <Text margin={{"right": "small"}}>
+              AutoPlay
+            </Text>
+            <Switch justify="end"  onChange={e => {
+                setAutoPlay(e)
+            }} checked={autoPlay} activeBoxShadow="0 0 1px 3px grey"/>
+            <Button onClick={handleChromecast} icon={<Cast margin="0px" />} plain={true} margin={{left: "small"}}/>
+          </Box>
+        </Box>
+        <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
+          <Box align="center" justify="center" pad="xsmall" margin="xsmall">
+            <Box align="center" justify="center" background={{ "dark": false, "color": "light-2", "image": `url('/podcasts/${podcast.id}/image')` }} round="xsmall" margin="medium" fill="vertical" pad="xlarge" />
+            <Heading level="2" size="medium" margin="xsmall" textAlign="center">
+              {podcast.name}
+            </Heading>
+            <Heading level="3" size="medium" margin="xsmall" textAlign="center">
+              {episode.name}
+            </Heading>
+            <Paragraph size="small" margin="medium" textAlign="center">
+              {episode.description.replace(/(<([^>]+)>)/gi, "")}
+            </Paragraph>
+          </Box>
+        </Box>
+
+        <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }} justify="end" fill="horizontal">
+          {audioPlayer}
         </Box>
 
       </Box>
