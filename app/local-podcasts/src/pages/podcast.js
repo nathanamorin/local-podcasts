@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Grommet, Box, List, Button, Text, Heading, Paragraph, TextInput } from 'grommet'
+import { Grommet, Box, InfiniteScroll, Button, Text, Heading, Paragraph, TextInput } from 'grommet'
 import { Play, Previous } from 'grommet-icons'
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import Fuse from 'fuse.js'
@@ -7,7 +7,7 @@ import { theme, background, cardBackground } from './theme'
 
 const searchOptions = {
   includeScore: false,
-  keys: ['name', 'description']
+  keys: ['name']
 }
 
 
@@ -70,9 +70,9 @@ export function Podcast() {
 
 
         <Box fill="horizontal" pad={{top: "medium"}}>
-          <List data={searchedEpisodes} paginate={false} pad="small">
+          <InfiniteScroll items={searchedEpisodes} pad="small">
             {(episode) => (
-              <Box align="center" justify="between" fill="horizontal" direction="row-responsive" pad="xxsmall">
+              <Box key={episode.id} align="center" justify="between" fill="horizontal" direction="row-responsive" pad="xxsmall">
 
                 <Box align="center" justify="start" direction="row" >
                   {/* <Box align="start" justify="start" fill="vertical" direction="column" pad="small" > */}
@@ -94,7 +94,7 @@ export function Podcast() {
                 </Box>
               </Box>
             )}
-          </List>
+          </InfiniteScroll>
         </Box>
 
 

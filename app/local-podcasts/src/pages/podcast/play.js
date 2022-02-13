@@ -90,6 +90,7 @@ export function PlayPodcast() {
       if(cast.castReceiver) {
           await cast.handleConnection()
           setChromecastPlaying(false)
+          console.log(cast)
       }
   }, [cast.castReceiver, cast.handleConnection])
 
@@ -99,8 +100,10 @@ export function PlayPodcast() {
       if (chromecastMedia.isMedia) {
         chromecastMedia.play()
       } else {
-        await chromecastMedia.playMedia(`https://podcasts.apps.dev.nathanmorin.com/podcasts/${podcast.id}/episodes/${episode.id}/stream`)
+        await chromecastMedia.playMedia(`${window.location.protocol}//${window.location.hostname}/podcasts/${podcast.id}/episodes/${episode.id}/stream`)
       }
+
+      console.log(cast)
     }
     setChromecastPlaying(true)
   }, [chromecastMedia])

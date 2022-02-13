@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from "react-router-dom";
-import { Grommet, Box, Heading, Paragraph, Button, TextInput } from 'grommet'
+import { Grommet, Box, Heading, Paragraph, Button, TextInput, InfiniteScroll } from 'grommet'
 import { AddCircle } from 'grommet-icons'
 import Fuse from 'fuse.js'
 import { theme, background, cardBackground } from './theme'
@@ -27,9 +27,9 @@ export function Index() {
 
   let results;
   if (searchText !== "") {
-    results = podcasts.podcastsSearch.search(searchText);
+    results = podcasts.podcastsSearch.search(searchText).map(x => x.item)
   } else {
-    results = podcasts.podcasts.map((item) => ({ item, matches: [], score: 1 }));
+    results = podcasts.podcasts
   }
 
   return (
@@ -49,10 +49,9 @@ export function Index() {
             <Button icon={<AddCircle />} margin="small" />
           </Link>
         </Box>
-
-        {
-          results.map(x => x.item).map((podcast, i) => (
-            <Link to="/podcast"
+        <InfiniteScroll items={results} replace={true}>
+          {(podcast) => (
+              <Link to="/podcast"
               state={{ podcast: podcast }}
               style={{ textDecoration: 'none' }}
               key={podcast.id}
@@ -69,8 +68,10 @@ export function Index() {
                 </Box>
               </Box>
             </Link>
-          ))
-        }
+
+          )
+          }
+        </InfiniteScroll>
       </Box>
 
     </Grommet>
