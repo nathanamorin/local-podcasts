@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 const podcastInfoFilename = "info.json"
@@ -157,19 +158,26 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 			continue
 		}
 		audio := item.Enclosures[0]
-		time, err := strconv.ParseInt(audio.Length, 10, 64)
+		audioLength, err := strconv.ParseInt(audio.Length, 10, 64)
 		if err != nil {
 			return nil, err
 		}
 
 		id := makeId(item.Title)
+
+		publishedTime := item.PublishedParsed
+		if publishedTime == nil {
+			currentTime := time.Now()
+			publishedTime = &currentTime
+		}
+
 		episodes = append(episodes, &Episode{
 			Name:             item.Title,
 			Id:               id,
 			Description:      item.Description,
 			AudioFile:        audio.URL,
-			Length:           time,
-			PublishTimestamp: item.PublishedParsed.Unix(),
+			Length:           audioLength,
+			PublishTimestamp: publishedTime.Unix(),
 		})
 	}
 
