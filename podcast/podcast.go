@@ -293,13 +293,6 @@ func (p *Podcast) syncNewData(feedData string) error {
 	for id, ep := range newPodcastInfo.episodesMap {
 		if _, exists := p.episodesMap[id]; !exists {
 			p.episodesMap[id] = ep
-		} else {
-			if !p.DisableAutoUpdate {
-				newEp := ep
-				newEp.AudioFile = p.episodesMap[id].AudioFile
-				newEp.Length = p.episodesMap[id].Length
-				p.episodesMap[id] = newEp
-			}
 		}
 	}
 
