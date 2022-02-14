@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from "react-router-dom";
 import { Grommet, Box, Heading, Paragraph, Button, TextInput, InfiniteScroll } from 'grommet'
-import { AddCircle } from 'grommet-icons'
+import { AddCircle, Star } from 'grommet-icons'
 import Fuse from 'fuse.js'
 import { theme, background, cardBackground } from './theme'
 
@@ -18,18 +18,47 @@ export function Index() {
   const [searchText, setSearchText] = useState("")
 
 
+  let starredPodcastsInit = localStorage.getItem('starredPodcasts')
+  if (starredPodcastsInit !== null) {
+    try {
+      starredPodcastsInit = JSON.parse(starredPodcastsInit)
+    } catch {
+        localStorage.removeItem('starredPodcasts')
+        starredPodcastsInit = []
+    }
+  } else {
+    starredPodcastsInit = []
+  }
+
+  const [starredPodcasts, setStarredPodcasts] = useState(starredPodcastsInit)
+
+
   useEffect(() => {
     fetch(`/podcasts`)
       .then((response) => response.json())
-      .then(({ podcasts }) => setPodcasts({ podcastsSearch: new Fuse(podcasts, searchOptions), podcasts }))
-  }, [])
+      .then(({ podcasts }) => podcasts.map(p => {
+        p.starred = starredPodcasts.includes(p.id)
+        if (p.starred) {
+          p.starColor = "gold"
+        } else {
+          p.starColor = "text"
+        }
+        return p
+      }))
+      .then((podcasts) => setPodcasts({ podcastsSearch: new Fuse(podcasts, searchOptions), podcasts }))
+  }, [starredPodcasts])
+
 
 
   let results;
   if (searchText !== "") {
     results = podcasts.podcastsSearch.search(searchText).map(x => x.item)
   } else {
-    results = podcasts.podcasts
+    results = podcasts.podcasts.sort((ele1, ele2) => {
+      if (ele1.starred && !ele2.starred) return -1
+      if (!ele1.starred && ele2.starred) return 1
+      return 0
+    })
   }
 
   return (
@@ -51,23 +80,36 @@ export function Index() {
         </Box>
         <InfiniteScroll items={results} replace={true}>
           {(podcast) => (
-              <Link to="/podcast"
-              state={{ podcast: podcast }}
-              style={{ textDecoration: 'none' }}
-              key={podcast.id}
-            >
-              <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
-                <Box align="center" justify="center" pad="xsmall" margin="xsmall">
-                  <Box align="center" justify="center" background={{ "dark": false, "color": "light-2", "image": `url('/podcasts/${podcast.id}/image')` }} round="xsmall" margin="medium" fill="vertical" pad="xlarge" />
-                  <Heading level="2" size="medium" margin="xsmall" textAlign="center" >
-                    {podcast.name}
-                  </Heading>
-                  <Paragraph size="small" margin="medium" textAlign="center">
-                    Latest: {podcast.latest_episode.name} {(new Date(podcast.latest_episode.publish_timestamp * 1000)).toLocaleDateString()}
-                  </Paragraph>
+              <Box key={podcast.id} align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
+                <Box justify="end" alignSelf="end" basis="0px" flex="shrink">
+                  <Button icon={<Star color={podcast.starColor}/>} size="large" style={{transform: "translateY(100%)"}} onClick={e => {
+                    const newStars = [...starredPodcasts]
+                    const starIdx = newStars.indexOf(podcast.id)
+                    if (starIdx === -1) {
+                      newStars.push(podcast.id)
+                    } else {
+                      newStars.splice(starIdx, 1)
+                    }
+                    setStarredPodcasts(newStars)
+                    localStorage.setItem('starredPodcasts', JSON.stringify(newStars))
+                  }}/>
                 </Box>
+                <Link to="/podcast"
+                  state={{ podcast: podcast }}
+                  style={{ textDecoration: 'none' }}
+                >
+                  <Box align="center" justify="center" pad="xsmall" margin="xsmall">
+                    <Box align="center" justify="center" background={{ "dark": false, "color": "light-2", "image": `url('/podcasts/${podcast.id}/image')` }} round="xsmall" margin="medium" fill="vertical" pad="xlarge" />
+                    <Heading level="2" size="medium" margin="xsmall" textAlign="center" color="text">
+                      {podcast.name}
+                    </Heading>
+                    <Paragraph size="small" margin="medium" textAlign="center" color="text">
+                      Latest: {podcast.latest_episode.name} {(new Date(podcast.latest_episode.publish_timestamp * 1000)).toLocaleDateString()}
+                    </Paragraph>
+                  </Box>
+                </Link>
               </Box>
-            </Link>
+
 
           )
           }
