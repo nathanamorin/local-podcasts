@@ -29,6 +29,7 @@ type Episode struct {
 	Description      string `json:"description"`
 	AudioFile        string `json:"audio_file"`
 	Length           int64  `json:"length"`
+	ReadOrder        int    `json:"read_order"`
 	PublishTimestamp int64  `json:"publish_timestamp"`
 }
 
@@ -153,7 +154,7 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 		return nil, err
 	}
 	episodes := make([]*Episode, 0)
-	for _, item := range feed.Items {
+	for i, item := range feed.Items {
 		if len(item.Enclosures) <= 0 {
 			continue
 		}
@@ -177,6 +178,7 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 			Description:      item.Description,
 			AudioFile:        audio.URL,
 			Length:           audioLength,
+			ReadOrder:        i,
 			PublishTimestamp: publishedTime.Unix(),
 		})
 	}
@@ -293,6 +295,10 @@ func (p *Podcast) syncNewData(feedData string) error {
 	for id, ep := range newPodcastInfo.episodesMap {
 		if _, exists := p.episodesMap[id]; !exists {
 			p.episodesMap[id] = ep
+		} else {
+			if !p.DisableAutoUpdate {
+				p.episodesMap[id].ReadOrder = ep.ReadOrder
+			}
 		}
 	}
 
@@ -466,9 +472,13 @@ func GetPodcast(config Config, id string) (*Podcast, error) {
 
 	podcast.fillEpisodeMap()
 
-	// Sort by publish date
+	// Sort by publish date & read order
 	sort.Slice(podcast.Episodes, func(i, j int) bool {
-		return podcast.Episodes[i].PublishTimestamp > podcast.Episodes[j].PublishTimestamp
+		if podcast.Episodes[i].PublishTimestamp > podcast.Episodes[j].PublishTimestamp {
+			return true
+		}
+
+		return podcast.Episodes[i].ReadOrder > podcast.Episodes[j].ReadOrder
 	})
 
 	podcast.LatestEpisode = podcast.Episodes[0]
