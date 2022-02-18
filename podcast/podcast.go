@@ -474,11 +474,11 @@ func GetPodcast(config Config, id string) (*Podcast, error) {
 
 	// Sort by publish date & read order
 	sort.Slice(podcast.Episodes, func(i, j int) bool {
-		if podcast.Episodes[i].PublishTimestamp > podcast.Episodes[j].PublishTimestamp {
-			return true
+		if podcast.Episodes[i].PublishTimestamp == podcast.Episodes[j].PublishTimestamp {
+			return podcast.Episodes[i].ReadOrder > podcast.Episodes[j].ReadOrder
 		}
 
-		return podcast.Episodes[i].ReadOrder > podcast.Episodes[j].ReadOrder
+		return podcast.Episodes[i].PublishTimestamp > podcast.Episodes[j].PublishTimestamp
 	})
 
 	podcast.LatestEpisode = podcast.Episodes[0]
