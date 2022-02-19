@@ -163,6 +163,7 @@ func main() {
 
 		c.Response().Status = http.StatusOK
 		c.Response().Header().Add(echo.HeaderContentType, mimeType)
+		c.Response().Header().Add("Cache-Control", "604800")
 		_, err = c.Response().Write(data)
 		return err
 	})
@@ -221,8 +222,26 @@ func main() {
 		}
 
 		c.Response().Status = http.StatusOK
-		http.ServeFile(c.Response().Writer, c.Request(), filePath)
-		return nil
+
+		imageFile, err := os.Open(filePath)
+		if err != nil {
+			klog.Errorf("error opening client status key %s: %s", key, err)
+			return c.JSONBlob(http.StatusInternalServerError, []byte("{\"error\": \"internal server error\"}"))
+		}
+		defer imageFile.Close()
+
+		byteValue, err := ioutil.ReadAll(imageFile)
+
+		if err != nil {
+			klog.Errorf("error reading client status key %s: %s", key, err)
+			return c.JSONBlob(http.StatusInternalServerError, []byte("{\"error\": \"internal server error\"}"))
+		}
+
+		c.Response().Status = http.StatusOK
+		c.Response().Header().Add(echo.HeaderContentType, "text/plain")
+		c.Response().Header().Add("Cache-Control", "no-cache")
+		_, err = c.Response().Write(byteValue)
+		return err
 	})
 
 	e.DELETE("/client-status/:key-id", func(c echo.Context) error {
