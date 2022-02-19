@@ -4,11 +4,14 @@ import { Play, Previous } from 'grommet-icons'
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import Fuse from 'fuse.js'
 import { theme, background, cardBackground } from './theme'
+import { getClientInfo, setClientInfo, deleteClientInfo } from './utils'
 
 const searchOptions = {
   includeScore: false,
   keys: ['name']
 }
+
+const playedEpisodesKey = "played-episodes"
 
 
 export function Podcast() {
@@ -18,9 +21,13 @@ export function Podcast() {
 
   const [episodes, setEpisodes] = useState(new Fuse([], searchOptions))
 
+  const [playedEpisodes, setPlayedEpisode] = useState({})
+
   const [searchText, setSearchText] = useState("")
 
-  useEffect(() => {
+  const playedEpisodesKey = `played-episodes-${podcast.id}`
+
+  useEffect(async () => {
     fetch(`/podcasts/${podcast.id}`)
       .then(data => {
         return data.json()
@@ -31,6 +38,27 @@ export function Podcast() {
       .catch(err => {
         console.log(err)
       })
+
+      const data = await getClientInfo(playedEpisodesKey)
+
+      if (data != null) {
+        let playedEpData = null
+        try {
+          playedEpData = JSON.parse(data)
+          for (const id in playedEpData) {
+            if (playedEpData[id] === null) {
+              playedEpData[id] = await getClientInfo(`${podcast.id}-${id}`)
+            }
+          }
+
+
+        } catch (ex) {
+          console.log(ex)
+          playedEpData = {}
+          await deleteClientInfo(playedEpisodesKey)
+        }
+        setPlayedEpisode(playedEpData)
+      }
   }, [])
 
 
@@ -41,7 +69,20 @@ export function Podcast() {
     searchedEpisodes = episodes.getIndex().docs.map((item) => ({ item, matches: [], score: 1 }));
   }
 
-  searchedEpisodes = searchedEpisodes.map(x => x.item)
+  searchedEpisodes = searchedEpisodes.map(x => x.item).map(x => {
+    const lengthPlayed = playedEpisodes[x.id]
+    if (lengthPlayed === undefined) {
+      x.percentPlayed = 0
+    } else {
+      if (x.audio_length_sec !== 0) {
+        x.percentPlayed = Math.round(lengthPlayed / x.audio_length_sec * 100)
+      } else {
+        x.percentPlayed = 0
+      }
+    }
+
+    return x
+  })
 
 
   return (
@@ -72,27 +113,36 @@ export function Podcast() {
         <Box fill="horizontal" pad={{top: "medium"}}>
           <InfiniteScroll items={searchedEpisodes} pad="small">
             {(episode) => (
-              <Box key={episode.id} align="center" justify="between" fill="horizontal" direction="row-responsive" pad="xxsmall">
+              <Link to="/podcast/play" 
+              state={{ podcast: podcast, episode: episode, episodes: searchedEpisodes }} 
+              style={{ textDecoration: 'none' }}
+              onClick={() => {
+                const newPlayed = {...playedEpisodes}
+                newPlayed[episode.id] = null
+                setPlayedEpisode(newPlayed)
+                setClientInfo(playedEpisodesKey, JSON.stringify(newPlayed))
+              }}  >
+                <Box key={episode.id} align="center" justify="between" 
+                fill="horizontal" direction="row-responsive"
+                margin={{top: "xxsmall"}}
+                background={`linear-gradient(to right, ${theme.global.colors['grey!']} ${episode.percentPlayed}% , ${theme.global.colors['dark-2']}  ${episode.percentPlayed}% 100%)`}>
 
-                <Box align="center" justify="start" direction="row" >
-                  {/* <Box align="start" justify="start" fill="vertical" direction="column" pad="small" > */}
-                    <Link to="/podcast/play" state={{ podcast: podcast, episode: episode, episodes: searchedEpisodes }}  >
-                      <Button icon={<Play />} size="large"/>
-                    </Link>
-                  {/* </Box> */}
-                  <Box align="start" justify="start" direction="column" >
-                    <Text>
-                      {episode.name}
+                  <Box align="center" justify="start" direction="row">
+                        <Button icon={<Play />} size="large"/>
+                    <Box align="start" justify="start" direction="column" >
+                      <Text color="text">
+                        {episode.name}
+                      </Text>
+                    </Box>
+                  </Box>
+
+                  <Box align="end" justify="end" direction="column">
+                    <Text color="text-weak">
+                      {(new Date(episode.publish_timestamp * 1000)).toLocaleDateString()}
                     </Text>
                   </Box>
                 </Box>
-
-                <Box align="end" justify="end" direction="column">
-                  <Text color="text-weak">
-                    {(new Date(episode.publish_timestamp * 1000)).toLocaleDateString()}
-                  </Text>
-                </Box>
-              </Box>
+              </Link>
             )}
           </InfiniteScroll>
         </Box>

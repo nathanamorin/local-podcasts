@@ -4,6 +4,7 @@ go 1.17
 
 require (
 	github.com/go-co-op/gocron v1.11.0
+	github.com/hajimehoshi/go-mp3 v0.3.2
 	github.com/labstack/echo/v4 v4.6.3
 	github.com/mmcdole/gofeed v1.1.3
 	github.com/stretchr/testify v1.7.0

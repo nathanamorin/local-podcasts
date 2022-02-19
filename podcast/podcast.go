@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hajimehoshi/go-mp3"
 	"github.com/mmcdole/gofeed"
 	"io/ioutil"
 	"k8s.io/klog/v2"
@@ -14,7 +15,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +28,7 @@ type Episode struct {
 	Id               string `json:"id"`
 	Description      string `json:"description"`
 	AudioFile        string `json:"audio_file"`
-	Length           int64  `json:"length"`
+	Length           int64  `json:"audio_length_sec"`
 	ReadOrder        int    `json:"read_order"`
 	PublishTimestamp int64  `json:"publish_timestamp"`
 }
@@ -159,10 +159,6 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 			continue
 		}
 		audio := item.Enclosures[0]
-		audioLength, err := strconv.ParseInt(audio.Length, 10, 64)
-		if err != nil {
-			return nil, err
-		}
 
 		id := makeId(item.Title)
 
@@ -177,7 +173,6 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 			Id:               id,
 			Description:      item.Description,
 			AudioFile:        audio.URL,
-			Length:           audioLength,
 			ReadOrder:        i,
 			PublishTimestamp: publishedTime.Unix(),
 		})
@@ -339,6 +334,29 @@ func (p *Podcast) Update(config Config) error {
 func (p *Podcast) SaveEpisode(config Config, episode *Episode) error {
 
 	if !strings.HasPrefix(episode.AudioFile, "http") {
+		if episode.Length <= 0 {
+			audioFile, err := p.GetAudioFile(config, episode.Id)
+			if err != nil {
+				klog.Errorf("error finding mp3 file to find length: %s", err)
+				return err
+			}
+			r, err := os.Open(audioFile)
+			if err != nil {
+				klog.Errorf("error opening mp3 file to find lenght: %s", err)
+				return err
+			}
+
+			d, err := mp3.NewDecoder(r)
+			if err != nil {
+				klog.Errorf("error decoding mp3 file to find lenght: %s", err)
+				return err
+			}
+
+			const sampleSize = int64(4)                      // From documentation.
+			samples := d.Length() / sampleSize               // Number of samples.
+			episode.Length = samples / int64(d.SampleRate()) // Audio length in seconds.
+		}
+
 		return nil
 	}
 
