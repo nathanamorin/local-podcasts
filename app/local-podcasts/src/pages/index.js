@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Link } from "react-router-dom";
 import { Grommet, Box, Heading, Paragraph, Button, TextInput, InfiniteScroll } from 'grommet'
-import { AddCircle, Star } from 'grommet-icons'
+import { AddCircle, Star, User } from 'grommet-icons'
 import Fuse from 'fuse.js'
 import { theme, background, cardBackground } from './theme'
+import { setClientInfo, getClientInfo, deleteClientInfo } from './utils';
 
 const searchOptions = {
   includeScore: false,
   keys: ['name']
 }
+
+const starredPodcastsKey = "starred-podcasts"
 
 
 export function Index() {
@@ -17,23 +20,33 @@ export function Index() {
 
   const [searchText, setSearchText] = useState("")
 
+  const [starredPodcasts, setStarredPodcasts] = useState([])
 
-  let starredPodcastsInit = localStorage.getItem('starredPodcasts')
-  if (starredPodcastsInit !== null) {
-    try {
-      starredPodcastsInit = JSON.parse(starredPodcastsInit)
-    } catch {
-        localStorage.removeItem('starredPodcasts')
-        starredPodcastsInit = []
+  const isInitialMount = useRef(true)
+
+  useEffect(async () => {
+    let starredPodcastsInit = await getClientInfo(starredPodcastsKey)
+    if (starredPodcastsInit !== null) {
+      try {
+        starredPodcastsInit = JSON.parse(starredPodcastsInit)
+      } catch {
+          await deleteClientInfo(starredPodcastsKey)
+          starredPodcastsInit = []
+      }
+    } else {
+      starredPodcastsInit = []
     }
-  } else {
-    starredPodcastsInit = []
-  }
 
-  const [starredPodcasts, setStarredPodcasts] = useState(starredPodcastsInit)
+    setStarredPodcasts(starredPodcastsInit)
+  
+  }, [])
 
 
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false
+      return
+   }
     fetch(`/podcasts`)
       .then((response) => response.json())
       .then(({ podcasts }) => podcasts.map(p => {
@@ -67,7 +80,7 @@ export function Index() {
         align="start" justify="center" pad="small" height="xlarge" 
         flex={false} fill="vertical" direction="row" wrap overflow="scroll">
 
-        <Box align="center" justify="end" direction="row" fill="horizontal" pad="large">
+        <Box align="center" justify="end" direction="row" fill="horizontal" pad="small">
           <TextInput
             placeholder="Search"
             value={searchText}
@@ -75,7 +88,10 @@ export function Index() {
             outline="none"
           />
           <Link to="/podcast/add">
-            <Button icon={<AddCircle />} margin="small" />
+            <Button icon={<AddCircle />} margin="none" />
+          </Link>
+          <Link to="/user-info">
+            <Button icon={<User />} margin="none" />
           </Link>
         </Box>
         <InfiniteScroll items={results} replace={true}>
@@ -91,7 +107,7 @@ export function Index() {
                       newStars.splice(starIdx, 1)
                     }
                     setStarredPodcasts(newStars)
-                    localStorage.setItem('starredPodcasts', JSON.stringify(newStars))
+                    setClientInfo(starredPodcastsKey, JSON.stringify(newStars))
                   }}/>
                 </Box>
                 <Link to="/podcast"

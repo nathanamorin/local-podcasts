@@ -7,6 +7,7 @@ import {
 import CastProvider from 'react-chromecast'
 
 import { Index } from './pages/index'
+import { UserInfo } from './pages/user-info'
 import { Podcast } from './pages/podcast'
 import { PlayPodcast } from './pages/podcast/play'
 import { AddPodcast } from './pages/podcast/add'
@@ -19,6 +20,7 @@ function App() {
                 <Router>
                 <Routes>
                   <Route path="/" element={<Index />}/>
+                  <Route path="/user-info" element={<UserInfo />}/>
                   <Route path="/podcast" element={<Podcast />}/>
                   <Route path="/podcast/play" element={<PlayPodcast />}/>
                   <Route path="/podcast/add" element={<AddPodcast />}/>

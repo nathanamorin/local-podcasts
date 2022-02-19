@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -490,6 +491,8 @@ func GetPodcast(config Config, id string) (*Podcast, error) {
 func ListPodcasts(config Config, includeEpisodes bool) ([]Podcast, error) {
 	files, err := ioutil.ReadDir(config.FileHome)
 
+	isAlpha := regexp.MustCompile(`^[a-z0-9]+$`).MatchString
+
 	if err != nil {
 		return nil, err
 	}
@@ -497,15 +500,15 @@ func ListPodcasts(config Config, includeEpisodes bool) ([]Podcast, error) {
 	podcasts := make([]Podcast, 0)
 
 	for _, fileInfo := range files {
-		if fileInfo.IsDir() {
+		if fileInfo.IsDir() && isAlpha(fileInfo.Name()) {
 			podcast, err := GetPodcast(config, fileInfo.Name())
+			if err != nil {
+				return nil, err
+			}
 			if includeEpisodes {
 				podcast.fillEpisodeMap()
 			} else {
 				podcast.Episodes = nil
-			}
-			if err != nil {
-				return nil, err
 			}
 			podcasts = append(podcasts, *podcast)
 		}
