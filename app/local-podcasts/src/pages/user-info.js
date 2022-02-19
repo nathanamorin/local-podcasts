@@ -4,8 +4,8 @@ import { Previous } from 'grommet-icons'
 import { useNavigate } from "react-router-dom"
 import { theme } from './theme'
 import { setClientToken, getClientToken, deleteClientToken } from './utils'
-import QRCode from "react-qr-code";
-import { QrReader } from 'react-qr-reader';
+import { Html5QrcodePlugin } from './qr-code'
+import QRCode from 'react-qr-code'
 
 
 export function UserInfo() {
@@ -13,7 +13,6 @@ export function UserInfo() {
 
   const [currentClientToken, setCurrentClientToken] = useState("")
   const [isReading, setIsReading] = useState(false)
-  // const [isReading, setIsReading] = useState(false)
 
   useEffect(() => {
     setCurrentClientToken(getClientToken())
@@ -22,20 +21,14 @@ export function UserInfo() {
 
   let reader = null
   if (isReading) {
-    reader =  <QrReader
-    onResult={(result, error) => {
-      if (!!result) {
-        setCurrentClientToken(result?.text)
+    reader = <Html5QrcodePlugin 
+      fps={10}
+      qrbox={250}
+      disableFlip={false}
+      qrCodeSuccessCallback={(decodedText, decodedResult) => {
+        setCurrentClientToken(decodedText)
         setIsReading(false)
-      }
-
-      if (!!error) {
-        console.info(error)
-      }
-    }}
-    constraints={{facingMode: "environment"}}
-    style={{ width: "200px", heigth: "100px" }}
-  />
+      }}/>
   }
 
   return (
@@ -62,7 +55,7 @@ export function UserInfo() {
             deleteClientToken()
           }} margin="medium"/>
         </Box>
-        <Box width="50%" >
+        <Box fill="horizontal" >
           {reader}
         </Box>
       </Box>
