@@ -154,7 +154,7 @@ func main() {
 			return c.String(http.StatusInternalServerError, "{\"error\": \"error getting podcast\"}")
 		}
 
-		data, mimeType, err := podcastData.GetImage(config)
+		imagePath := podcastData.GetImage(config)
 
 		if err != nil {
 			klog.Errorf("error getting image: %s", err)
@@ -162,10 +162,8 @@ func main() {
 		}
 
 		c.Response().Status = http.StatusOK
-		c.Response().Header().Add(echo.HeaderContentType, mimeType)
-		c.Response().Header().Add("Cache-Control", "604800")
-		_, err = c.Response().Write(data)
-		return err
+		http.ServeFile(c.Response().Writer, c.Request(), imagePath)
+		return nil
 	})
 
 	e.GET("/podcasts/:podcast_id/update", func(c echo.Context) error {

@@ -9,7 +9,6 @@ import (
 	"github.com/mmcdole/gofeed"
 	"io/ioutil"
 	"k8s.io/klog/v2"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -207,21 +206,8 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 
 }
 
-func (p *Podcast) GetImage(config Config) ([]byte, string, error) {
-	filePath := filepath.Join(config.FileHome, p.Id, p.ImageFile)
-	imageFile, err := os.Open(filePath)
-	if err != nil {
-		return nil, "", err
-	}
-	defer imageFile.Close()
-
-	byteValue, err := ioutil.ReadAll(imageFile)
-
-	if err != nil {
-		return nil, "", err
-	}
-
-	return byteValue, mime.TypeByExtension(filepath.Ext(p.ImageFile)), nil
+func (p *Podcast) GetImage(config Config) string {
+	return filepath.Join(config.FileHome, p.Id, p.ImageFile)
 }
 
 func (p *Podcast) GetAudioFile(config Config, episodeId string) (string, error) {
