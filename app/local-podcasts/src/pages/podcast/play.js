@@ -8,7 +8,7 @@ import Switch from "react-switch"
 import { useCast, useMedia } from 'react-chromecast'
 import './custom-player.scss'
 import { theme, background, cardBackground } from '../theme'
-import { useKeyPress } from '../utils'
+import { useKeyPress, getClientInfo, setClientInfo } from '../utils'
 
 
 export function PlayPodcast() {
@@ -53,7 +53,7 @@ export function PlayPodcast() {
   const [autoPlay, setAutoPlay] = useState(false)
   const [chromecastPlaying, setChromecastPlaying] = useState(false)
 
-  useEffect(() => {
+  useEffect(async () => {
       let newEpisode = null
       let newPodcast = null
       // Check if state exists
@@ -80,8 +80,6 @@ export function PlayPodcast() {
 
     setEpisode(newEpisode)
     setPodcast(newPodcast)
-
-
   }, [])
 
 
@@ -175,23 +173,24 @@ export function PlayPodcast() {
     </Box>
   } else {
     audioPlayer = <AudioPlayer
-              autoPlay
+              autoPlay={true}
               src={`/podcasts/${podcast.id}/episodes/${episode.id}/stream`}
-              onListen={e => {
+              onListen={async e => {
                 // For some reason, this is called with a empty audio element 
                 // when navigation is triggered, do some quick checks to prevent setting
                 // a play time when this happens
                 if (e.target.src === undefined || e.target.src === "") {
                   return
                 }
-                localStorage.setItem(`${podcast.id}/${episode.id}`, e.target.currentTime)
+                await setClientInfo(`${podcast.id}-${episode.id}`, e.target.currentTime)
               }}
-              onLoadedMetaData={e => {
+              listenInterval={1000}
+              onLoadStart={async e => {
                 // Check saved play point
-                const startTime = localStorage.getItem(`${podcast.id}/${episode.id}`)
+                const startTime = await getClientInfo(`${podcast.id}-${episode.id}`)
 
-                if (startTime !== undefined) {
-                  player.current.audio.current.currentTime = startTime
+                if (startTime !== null) {
+                  e.target.currentTime = Number(startTime)
                 }
 
                 setMediaMetadata()
