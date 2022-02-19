@@ -13,6 +13,7 @@ export function UserInfo() {
 
   const [currentClientToken, setCurrentClientToken] = useState("")
   const [isReading, setIsReading] = useState(false)
+  // const [isReading, setIsReading] = useState(false)
 
   useEffect(() => {
     setCurrentClientToken(getClientToken())
@@ -32,9 +33,7 @@ export function UserInfo() {
         console.info(error)
       }
     }}
-    // facingMode={selected}
-    delay={500}
-    // chooseDeviceId={()=>selected}
+    constraints={{facingMode: "environment"}}
     style={{ width: "200px", heigth: "100px" }}
   />
   }
@@ -63,7 +62,7 @@ export function UserInfo() {
             deleteClientToken()
           }} margin="medium"/>
         </Box>
-        <Box fill="horizontal" >
+        <Box width="50%" >
           {reader}
         </Box>
       </Box>

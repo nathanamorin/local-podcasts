@@ -20,7 +20,7 @@ export function useKeyPress(targetKeyCode, handler) {
 export function getClientToken() {
   const token = localStorage.getItem("clientToken")
   if (token === null) {
-    const newToken = window.crypto.getRandomValues(new Uint32Array(100)).join("")
+    const newToken = window.crypto.getRandomValues(new Uint32Array(10)).join("")
 
     setClientToken(newToken)
     return newToken
