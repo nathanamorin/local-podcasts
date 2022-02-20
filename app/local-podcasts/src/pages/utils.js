@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-export function useKeyPress(targetKeyCode, handler) {
+export function useKeyPress(targetKeyCode, dependencies, handler) {
     // If pressed key is our target key then set to true
     function downHandler({ code }) {
       if (code === targetKeyCode) {
@@ -14,7 +14,7 @@ export function useKeyPress(targetKeyCode, handler) {
       return () => {
         window.removeEventListener("keydown", downHandler)
       }
-    }, []) // Empty array ensures that effect is only run on mount and unmount
+    }, dependencies) // Empty array ensures that effect is only run on mount and unmount
   }
 
 export function getClientToken() {

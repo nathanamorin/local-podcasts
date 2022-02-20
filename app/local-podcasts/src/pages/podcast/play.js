@@ -14,38 +14,12 @@ import { useKeyPress, getClientInfo, setClientInfo } from '../utils'
 export function PlayPodcast() {
   const location = useLocation()
   const navigate = useNavigate()
-  const player = createRef()
+  const [player, setPlayer] = useState(null)
   const cast = useCast({
       initialize_media_player: "DEFAULT_MEDIA_RECEIVER_APP_ID",
       auto_initialize: true,
   })
   const chromecastMedia = useMedia()
-
-
-  useKeyPress("Space", () => {
-      if (cast.isConnect) {
-        return
-      }
-      const controlls = player.current.audio.current
-      if (controlls.paused) {
-        controlls.play()
-      } else {
-        controlls.pause()
-      }
-  })
-
-  useKeyPress("ArrowRight", () => {
-    if (cast.isConnect) {
-      return
-    }
-    player.current.handleClickForward()
-  })
-  useKeyPress("ArrowLeft", () => {
-    if (cast.isConnect) {
-      return
-    }
-    player.current.handleClickRewind()
-  })
 
   const [episode, setEpisode] = useState(null)
   const [podcast, setPodcast] = useState(null)
@@ -113,6 +87,31 @@ export function PlayPodcast() {
     }
     setChromecastPlaying(false)
   }, [chromecastMedia])
+
+  useKeyPress("Space", [player], () => {
+      if (cast.isConnect) {
+        return
+      }
+      const controlls = player.audio.current
+      if (controlls.paused) {
+        controlls.play()
+      } else {
+        controlls.pause()
+      }
+  })
+
+  useKeyPress("ArrowRight", [player], () => {
+    if (cast.isConnect) {
+      return
+    }
+    player.handleClickForward()
+  })
+  useKeyPress("ArrowLeft", [player], () => {
+    if (cast.isConnect) {
+      return
+    }
+    player.handleClickRewind()
+  })
 
 
 
@@ -223,7 +222,7 @@ export function PlayPodcast() {
               }}
               customAdditionalControls={[]}
               hasDefaultKeyBindings={false}
-              ref={player}
+              ref={ele => setPlayer(ele)}
             />
   }
 
