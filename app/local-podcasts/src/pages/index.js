@@ -1,22 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Link } from "react-router-dom";
+import { Link } from "react-router-dom"
 import { Grommet, Box, Heading, Paragraph, Button, TextInput, InfiniteScroll } from 'grommet'
 import { AddCircle, Star, User } from 'grommet-icons'
-import Fuse from 'fuse.js'
 import { theme, background, cardBackground } from './theme'
-import { setClientInfo, getClientInfo, deleteClientInfo } from './utils';
-
-const searchOptions = {
-  includeScore: false,
-  keys: ['name']
-}
+import { setClientInfo, getClientInfo, deleteClientInfo } from './utils'
 
 const starredPodcastsKey = "starred-podcasts"
 
 
 export function Index() {
 
-  const [podcasts, setPodcasts] = useState({ podcastsSearch: new Fuse([], searchOptions), podcasts: [] })
+  const [podcasts, setPodcasts] = useState({ podcasts: [] })
 
   const [searchText, setSearchText] = useState("")
 
@@ -58,14 +52,14 @@ export function Index() {
         }
         return p
       }))
-      .then((podcasts) => setPodcasts({ podcastsSearch: new Fuse(podcasts, searchOptions), podcasts }))
+      .then((podcasts) => setPodcasts({ podcasts }))
   }, [starredPodcasts])
 
 
 
   let results;
   if (searchText !== "") {
-    results = podcasts.podcastsSearch.search(searchText).map(x => x.item)
+    results = podcasts.podcasts.filter(x => x.name.toLowerCase().includes(searchText.toLowerCase()))
   } else {
     results = podcasts.podcasts.sort((ele1, ele2) => {
       if (ele1.starred && !ele2.starred) return -1

@@ -2,14 +2,9 @@ import React, { useState, useEffect } from 'react'
 import { Grommet, Box, InfiniteScroll, Button, Text, Heading, Paragraph, TextInput } from 'grommet'
 import { Play, Previous } from 'grommet-icons'
 import { Link, useLocation, useNavigate } from "react-router-dom"
-import Fuse from 'fuse.js'
 import { theme, background, cardBackground } from './theme'
 import { getClientInfo, setClientInfo, deleteClientInfo } from './utils'
 
-const searchOptions = {
-  includeScore: false,
-  keys: ['name']
-}
 
 const playedEpisodesKey = "played-episodes"
 
@@ -19,7 +14,7 @@ export function Podcast() {
   const navigate = useNavigate()
   const podcast = location.state.podcast
 
-  const [episodes, setEpisodes] = useState(new Fuse([], searchOptions))
+  const [episodes, setEpisodes] = useState([])
 
   const [playedEpisodes, setPlayedEpisode] = useState({})
 
@@ -33,7 +28,7 @@ export function Podcast() {
         return data.json()
       })
       .then(data => {
-        setEpisodes(new Fuse(data.episodes, searchOptions))
+        setEpisodes(data.episodes)
       })
       .catch(err => {
         console.log(err)
@@ -64,12 +59,12 @@ export function Podcast() {
 
   let searchedEpisodes;
   if (searchText !== "") {
-    searchedEpisodes = episodes.search(searchText);
+    searchedEpisodes = episodes.filter(x => x.name.toLowerCase().includes(searchText.toLowerCase()))
   } else {
-    searchedEpisodes = episodes.getIndex().docs.map((item) => ({ item, matches: [], score: 1 }));
+    searchedEpisodes = episodes
   }
 
-  searchedEpisodes = searchedEpisodes.map(x => x.item).map(x => {
+  searchedEpisodes = searchedEpisodes.map(x => {
     const lengthPlayed = playedEpisodes[x.id]
     if (lengthPlayed === undefined) {
       x.percentPlayed = 0
@@ -113,7 +108,7 @@ export function Podcast() {
         <Box fill="horizontal" pad={{top: "medium"}}>
           <InfiniteScroll items={searchedEpisodes} pad="small">
             {(episode) => (
-              <Link to="/podcast/play" 
+              <Link key={episode.id} to="/podcast/play" 
               state={{ podcast: podcast, episode: episode, episodes: searchedEpisodes }} 
               style={{ textDecoration: 'none' }}
               onClick={() => {
@@ -122,7 +117,7 @@ export function Podcast() {
                 setPlayedEpisode(newPlayed)
                 setClientInfo(playedEpisodesKey, JSON.stringify(newPlayed))
               }}  >
-                <Box key={episode.id} align="center" justify="between" 
+                <Box align="center" justify="between" 
                 fill="horizontal" direction="row-responsive"
                 margin={{top: "xxsmall"}}
                 background={`linear-gradient(to right, ${theme.global.colors['grey!']} ${episode.percentPlayed}% , ${theme.global.colors['dark-2']}  ${episode.percentPlayed}% 100%)`}>
