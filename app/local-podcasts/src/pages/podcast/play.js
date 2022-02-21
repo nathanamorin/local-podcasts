@@ -131,22 +131,22 @@ export function PlayPodcast() {
         ]
       })
       navigator.mediaSession.setActionHandler('play', () => {
-        player.current.audio.current.play()
+        player.audio.current.play()
       })
       navigator.mediaSession.setActionHandler('pause', () => {
-        player.current.audio.current.pause()
+        player.audio.current.pause()
       })
       navigator.mediaSession.setActionHandler('seekbackward', () => {
-        player.current.handleClickRewind()
+        player.handleClickRewind()
       })
       navigator.mediaSession.setActionHandler('seekforward', () => {
-        player.current.handleClickForward()
+        player.handleClickForward()
       })
       navigator.mediaSession.setActionHandler('previoustrack', () => {
-        player.current.handleClickRewind()
+        player.handleClickRewind()
       })
       navigator.mediaSession.setActionHandler('nexttrack', () => {
-        player.current.handleClickForward()
+        player.handleClickForward()
       })
     }
   }
