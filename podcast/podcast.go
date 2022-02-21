@@ -221,7 +221,6 @@ func (p *Podcast) GetAudioFile(config Config, episodeId string) (string, error) 
 }
 
 func (p *Podcast) mergeNewInfo(newPodcast *Podcast) {
-	p.Id = newPodcast.Id
 	p.Name = newPodcast.Name
 	p.ImageFile = newPodcast.ImageFile
 	p.Description = newPodcast.Description
