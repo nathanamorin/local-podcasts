@@ -68,3 +68,16 @@ export async function deleteClientInfo(key) {
     }
   })
 }
+
+export function group(list, n) {
+  const increment = Math.max(n, 1);
+  const newList = [];
+  let lastIdx = 0;
+  for (let i = 0; i < list.length; i += increment) {
+    const end = Math.min(list.length, i + increment);
+    newList.push(list.slice(lastIdx, end));
+    lastIdx = end;
+  }
+
+  return newList;
+}
