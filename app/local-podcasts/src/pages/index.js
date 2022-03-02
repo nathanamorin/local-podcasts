@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Link } from "react-router-dom"
 import { Grommet, Box, Heading, Paragraph, Button, TextInput, InfiniteScroll } from 'grommet'
-import { AddCircle, Star, User } from 'grommet-icons'
+import { AddCircle, Star, User, Update } from 'grommet-icons'
 import { theme, background, cardBackground } from './theme'
 import { setClientInfo, getClientInfo, deleteClientInfo, group } from './utils'
 
@@ -84,6 +84,11 @@ export function Index() {
             <Link to="/user-info">
               <Button icon={<User />} margin="none" />
             </Link>
+            <Button icon={<Update />} margin="none" onClick={()=>{
+              fetch(`/refresh`)
+              .then((response) => response.json())
+              .then((re) => console.log(re))
+            }}/>
         </Box>
       </Box>
       <Box justify="center">

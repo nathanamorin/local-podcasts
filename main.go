@@ -36,6 +36,22 @@ func clientInfo(config podcast.Config, c echo.Context) (string, string) {
 	return key, filePath
 }
 
+func refresh(config podcast.Config, pw *podcast.PodcastWatcher) {
+	if !pw.QueueEmpty() {
+		klog.Infof("podcasts still in update queue, skipping cron update")
+	}
+
+	podcasts, err := podcast.ListPodcasts(config, true)
+
+	if err != nil {
+		klog.Errorf("error listing podcasts on refresh: %s", err)
+	} else {
+		for _, p := range podcasts {
+			pw.EnqueuePodcast(p)
+		}
+	}
+}
+
 func main() {
 
 	klog.InitFlags(nil)
@@ -68,19 +84,7 @@ func main() {
 
 	_, err := s.Every(1).Hour().Do(func() {
 
-		if !pw.QueueEmpty() {
-			klog.Infof("podcasts still in update queue, skipping cron update")
-		}
-
-		podcasts, err := podcast.ListPodcasts(config, true)
-
-		if err != nil {
-			klog.Errorf("error listing podcasts on refresh: %s", err)
-		} else {
-			for _, p := range podcasts {
-				pw.EnqueuePodcast(p)
-			}
-		}
+		refresh(config, &pw)
 
 	})
 
@@ -93,6 +97,14 @@ func main() {
 	if err != nil {
 		return
 	}
+
+	e.GET("/refresh", func(c echo.Context) error {
+		refresh(config, &pw)
+		return c.JSON(http.StatusOK, map[string]string{
+			"status": "ok",
+		})
+	})
+
 	e.GET("/podcasts", func(c echo.Context) error {
 
 		podcasts, err := podcast.ListPodcasts(config, false)
