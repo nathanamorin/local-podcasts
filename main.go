@@ -39,6 +39,7 @@ func clientInfo(config podcast.Config, c echo.Context) (string, string) {
 func refresh(config podcast.Config, pw *podcast.PodcastWatcher) {
 	if !pw.QueueEmpty() {
 		klog.Infof("podcasts still in update queue, skipping cron update")
+		return
 	}
 
 	podcasts, err := podcast.ListPodcasts(config, true)
