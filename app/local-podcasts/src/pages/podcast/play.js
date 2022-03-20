@@ -159,6 +159,8 @@ export function PlayPodcast() {
     playIcon = <Play/>
   }
 
+  const audioFile = `/podcasts/${podcast.id}/episodes/${episode.id}/stream`
+
   if (cast.isConnect) {
     audioPlayer = <Box>
       <Button onClick={() => {
@@ -173,7 +175,7 @@ export function PlayPodcast() {
   } else {
     audioPlayer = <AudioPlayer
               autoPlay={true}
-              src={`/podcasts/${podcast.id}/episodes/${episode.id}/stream`}
+              src={audioFile}
               onListen={async e => {
                 // For some reason, this is called with a empty audio element 
                 // when navigation is triggered, do some quick checks to prevent setting
@@ -232,6 +234,7 @@ export function PlayPodcast() {
   return (
 
     <Grommet full theme={theme}>
+      <link rel="preload" as="audio" href={audioFile}/>
       <Box align="start" justify="center" pad="small" background={background} height="xlarge" flex={false} fill="vertical" direction="row" wrap overflow="auto">
         <Box justify="center" align="start" justify="between" fill="horizontal" direction="row">
           <Button onClick={() => navigate(-1)} justify="start" icon={<Previous />}/>
