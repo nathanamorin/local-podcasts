@@ -9,6 +9,7 @@ require (
 	github.com/mmcdole/gofeed v1.1.3
 	github.com/stretchr/testify v1.7.0
 	k8s.io/klog/v2 v2.40.1
+	github.com/gorilla/feeds v1.1.1
 )
 
 require (

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gorilla/feeds"
 	"github.com/hajimehoshi/go-mp3"
 	"github.com/mmcdole/gofeed"
 	"io/ioutil"
@@ -144,6 +145,40 @@ func (p *Podcast) readCurrentFeed() (string, error) {
 func makeId(name string) string {
 	hash := md5.Sum([]byte(name))
 	return hex.EncodeToString(hash[:])
+}
+
+func RenderPodcasts(podcasts []Podcast, hostPrefix string) (string, error) {
+	var items []*feeds.Item
+
+	for _, podcast := range podcasts {
+		for _, ep := range podcast.Episodes {
+			items = append(items, &feeds.Item{
+				Title: podcast.Name + " - " + ep.Name,
+				Link: &feeds.Link{
+					// /podcasts/:podcast_id/episodes/:episode_id/stream
+					Href: hostPrefix + "/podcasts/" + podcast.Id + "/episodes/" + ep.Id + "/stream",
+					Type: "audio",
+				},
+				Description: ep.Description,
+				Id:          podcast.Id + "--" + ep.Id,
+				Updated:     time.Unix(ep.PublishTimestamp, 0),
+				Created:     time.Unix(ep.PublishTimestamp, 0),
+			})
+		}
+	}
+
+	feed := feeds.Feed{
+		Title: "Local Podcasts",
+		Link: &feeds.Link{
+			Href: "https://github.com/nathanamorin/local-podcasts",
+		},
+		Description: "Local Podcasts Consolidated Feed",
+		Updated:     time.Now(),
+		Created:     time.Now(),
+		Items:       items,
+	}
+
+	return feed.ToRss()
 }
 
 func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
