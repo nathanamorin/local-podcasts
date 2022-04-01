@@ -154,9 +154,8 @@ func RenderPodcasts(podcasts []Podcast, hostPrefix string) (string, error) {
 		for _, ep := range podcast.Episodes {
 			items = append(items, &feeds.Item{
 				Title: podcast.Name + " - " + ep.Name,
-				Link: &feeds.Link{
-					// /podcasts/:podcast_id/episodes/:episode_id/stream
-					Href: hostPrefix + "/podcasts/" + podcast.Id + "/episodes/" + ep.Id + "/stream",
+				Enclosure: &feeds.Enclosure{
+					Url:  hostPrefix + "/podcasts/" + podcast.Id + "/episodes/" + ep.Id + "/stream",
 					Type: "audio",
 				},
 				Description: ep.Description,
