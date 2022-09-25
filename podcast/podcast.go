@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -54,15 +55,21 @@ type PodcastWatcher struct {
 	podcastsToUpdate     chan Podcast
 	currentDownloads     map[string]int
 	currentDownloadsLock sync.RWMutex
+	podcastsCache        []Podcast
+	podcastsCacheLock    sync.RWMutex
+	config               Config
 }
 
 const threads = 5
 
-func NewPodcastWatcher() PodcastWatcher {
+func NewPodcastWatcher(config Config) PodcastWatcher {
 	return PodcastWatcher{
 		podcastsToUpdate:     make(chan Podcast, 500),
 		currentDownloads:     make(map[string]int),
 		currentDownloadsLock: sync.RWMutex{},
+		podcastsCache:        make([]Podcast, 0),
+		podcastsCacheLock:    sync.RWMutex{},
+		config:               config,
 	}
 }
 
@@ -103,6 +110,11 @@ func (pw *PodcastWatcher) Run(config Config) {
 					if err != nil {
 						klog.Errorf("error updating podcast (%s): %s", podcastToUpdate.Name, err)
 					}
+
+					_, err = pw.RefreshPodcastMetadataCache()
+					if err != nil {
+						klog.Errorf("error refreshing podcast cache (%s): %s", podcastToUpdate.Name, err)
+					}
 				}()
 			}
 		}()
@@ -120,6 +132,95 @@ func (pw *PodcastWatcher) QueueEmpty() bool {
 func (pw *PodcastWatcher) EnqueuePodcast(podcast Podcast) {
 	klog.Infof("enqueued podcast %s for update", podcast.Name)
 	pw.podcastsToUpdate <- podcast
+}
+
+func (pw *PodcastWatcher) GetPodcast(id string) (*Podcast, error) {
+	filePath := filepath.Join(pw.config.FileHome, id, podcastInfoFilename)
+	jsonFile, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer jsonFile.Close()
+
+	byteValue, err := ioutil.ReadAll(jsonFile)
+
+	if err != nil {
+		return nil, err
+	}
+
+	podcast := NewPodcastObj()
+
+	err = json.Unmarshal(byteValue, &podcast)
+	if err != nil {
+		return nil, err
+	}
+
+	podcast.fillEpisodeMap()
+
+	// Sort by publish date & read order
+	sort.Slice(podcast.Episodes, func(i, j int) bool {
+		if podcast.Episodes[i].PublishTimestamp == podcast.Episodes[j].PublishTimestamp {
+			return podcast.Episodes[i].ReadOrder > podcast.Episodes[j].ReadOrder
+		}
+
+		return podcast.Episodes[i].PublishTimestamp > podcast.Episodes[j].PublishTimestamp
+	})
+
+	podcast.LatestEpisode = podcast.Episodes[0]
+
+	return &podcast, nil
+
+}
+
+func (pw *PodcastWatcher) ListPodcasts() ([]Podcast, error) {
+	pw.podcastsCacheLock.RLock()
+	if len(pw.podcastsCache) > 0 {
+		podcasts := make([]Podcast, len(pw.podcastsCache))
+		copy(podcasts, pw.podcastsCache)
+		pw.podcastsCacheLock.RUnlock()
+		return podcasts, nil
+	}
+	pw.podcastsCacheLock.RUnlock()
+
+	podcasts, err := pw.RefreshPodcastMetadataCache()
+	if err != nil {
+		return nil, err
+	}
+
+	return podcasts, nil
+}
+
+func (pw *PodcastWatcher) RefreshPodcastMetadataCache() ([]Podcast, error) {
+	pw.podcastsCacheLock.Lock()
+	defer pw.podcastsCacheLock.Unlock()
+	files, err := ioutil.ReadDir(pw.config.FileHome)
+
+	isAlpha := regexp.MustCompile(`^[a-z0-9]+$`).MatchString
+
+	if err != nil {
+		return nil, err
+	}
+
+	podcasts := make([]Podcast, 0)
+
+	for _, fileInfo := range files {
+		if fileInfo.IsDir() && isAlpha(fileInfo.Name()) {
+			podcast, err := pw.GetPodcast(fileInfo.Name())
+			if err != nil {
+				return nil, err
+			}
+			podcast.fillEpisodeMap()
+			podcasts = append(podcasts, *podcast)
+		}
+	}
+
+	sort.Slice(podcasts, func(i, j int) bool {
+		return podcasts[i].LatestEpisode.PublishTimestamp > podcasts[j].LatestEpisode.PublishTimestamp
+	})
+
+	pw.podcastsCache = podcasts
+
+	return podcasts, nil
 }
 
 func NewPodcastObj() Podcast {
@@ -202,6 +303,12 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 			publishedTime = &currentTime
 		}
 
+		audioLength, err := strconv.ParseInt(audio.Length, 10, 64)
+		if err != nil {
+			audioLength = 0
+			klog.Infof("invalid audio length %s for podcast %s", audio.Length, feed.Title)
+		}
+
 		episodes = append(episodes, &Episode{
 			Name:             item.Title,
 			Id:               id,
@@ -209,6 +316,7 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 			AudioFile:        audio.URL,
 			ReadOrder:        i,
 			PublishTimestamp: publishedTime.Unix(),
+			Length:           audioLength,
 		})
 	}
 
@@ -270,7 +378,7 @@ func AddPodcast(config Config, RSSUrl string) (*Podcast, error) {
 
 	newPodcastInfo, err := parsePodcastRss(feedData, podcast.RSSUrl)
 
-	err = newPodcastInfo.SaveInfo(config)
+	err = newPodcastInfo.SavePodcastMetadata(config)
 	if err != nil {
 		return nil, err
 	}
@@ -350,11 +458,11 @@ func (p *Podcast) Update(config Config) error {
 	}
 
 	for _, ep := range p.Episodes {
-		err := p.SaveEpisode(config, ep)
+		err := p.SyncPodcastEpisode(config, ep)
 		if err != nil {
 			return fmt.Errorf("error saving episode: %s", err)
 		}
-		err = p.SaveInfo(config)
+		err = p.SavePodcastMetadata(config)
 		if err != nil {
 			return fmt.Errorf("error saving info after saving episode: %s", err)
 		}
@@ -364,79 +472,90 @@ func (p *Podcast) Update(config Config) error {
 	return nil
 }
 
-func (p *Podcast) SaveEpisode(config Config, episode *Episode) error {
-
-	if !strings.HasPrefix(episode.AudioFile, "http") {
-		if episode.Length <= 0 {
-			audioFile, err := p.GetAudioFile(config, episode.Id)
-			if err != nil {
-				klog.Errorf("error finding mp3 file to find length: %s", err)
-				return err
-			}
-			r, err := os.Open(audioFile)
-			if err != nil {
-				klog.Errorf("error opening mp3 file to find lenght: %s", err)
-				return err
-			}
-
-			d, err := mp3.NewDecoder(r)
-			if err != nil {
-				klog.Errorf("error decoding mp3 file to find lenght: %s", err)
-				return err
-			}
-
-			const sampleSize = int64(4)                      // From documentation.
-			samples := d.Length() / sampleSize               // Number of samples.
-			episode.Length = samples / int64(d.SampleRate()) // Audio length in seconds.
-		}
-
-		return nil
-	}
-
-	if err := p.checkPodcastDirExists(config); err != nil {
-		return err
-	}
-	klog.Infof("downloading podcast: %s -> %s", p.Name, episode.Name)
-	resp, err := http.Get(episode.AudioFile)
+func getAudioLength(audioFile string) (int64, error) {
+	r, err := os.Open(audioFile)
 	if err != nil {
-		return err
+		klog.Errorf("error opening mp3 file to find lenght: %s", err)
+		return -1, err
 	}
-	defer resp.Body.Close()
 
-	fileExtension := filepath.Ext(episode.AudioFile)
-	if fileExtension == "" {
-		// Assume mp3 if ext not defined
-		fileExtension = ".mp3"
+	d, err := mp3.NewDecoder(r)
+	if err != nil {
+		klog.Errorf("error decoding mp3 file to find lenght: %s", err)
+		return -1, err
 	}
-	fileExtension = strings.Split(fileExtension, "?")[0]
-	episodeFilename := episode.Id + fileExtension
 
-	episodeFilePath := filepath.Join(config.FileHome, p.Id, episodeFilename)
+	const sampleSize = int64(4)                 // From documentation.
+	samples := d.Length() / sampleSize          // Number of samples.
+	return samples / int64(d.SampleRate()), nil // Audio length in seconds.
+}
 
-	if _, err := os.Stat(episodeFilePath); !errors.Is(err, os.ErrNotExist) {
-		err := os.Remove(episodeFilePath)
+func (p *Podcast) SyncPodcastEpisode(config Config, episode *Episode) error {
+
+	if strings.HasPrefix(episode.AudioFile, "http") {
+		// Download podcast episode
+		if err := p.checkPodcastDirExists(config); err != nil {
+			return err
+		}
+		klog.Infof("downloading podcast: %s -> %s", p.Name, episode.Name)
+		resp, err := http.Get(episode.AudioFile)
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
+
+		fileExtension := filepath.Ext(episode.AudioFile)
+		if fileExtension == "" {
+			// Assume mp3 if ext not defined
+			fileExtension = ".mp3"
+		}
+		fileExtension = strings.Split(fileExtension, "?")[0]
+		episodeFilename := episode.Id + fileExtension
+
+		episodeFilePath := filepath.Join(config.FileHome, p.Id, episodeFilename)
+
+		if _, err := os.Stat(episodeFilePath); !errors.Is(err, os.ErrNotExist) {
+			err := os.Remove(episodeFilePath)
+			if err != nil {
+				return err
+			}
+		}
+
+		file, err := os.Create(episodeFilePath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		_, err = file.ReadFrom(resp.Body)
+		if err != nil {
+			return err
+		}
+
+		episode.AudioFile = episodeFilename
+		klog.Infof("finished downloading podcast: %s -> %s", p.Name, episode.Name)
 	}
 
-	file, err := os.Create(episodeFilePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
+	if episode.Length <= 0 {
+		audioFile, err := p.GetAudioFile(config, episode.Id)
+		if err != nil {
+			klog.Errorf("error finding mp3 file to find length: %s", err)
+			return err
+		}
+		audioLength, err := getAudioLength(audioFile)
 
-	_, err = file.ReadFrom(resp.Body)
-	if err != nil {
-		return err
+		if err != nil {
+			klog.Errorf("error fetching audio metadata: %s", err)
+			return err
+		}
+		episode.Length = audioLength
 	}
 
-	episode.AudioFile = episodeFilename
-	klog.Infof("finished downloading podcast: %s -> %s", p.Name, episode.Name)
 	return nil
+
 }
 
-func (p *Podcast) SaveInfo(config Config) error {
+func (p *Podcast) SavePodcastMetadata(config Config) error {
 
 	if err := p.checkPodcastDirExists(config); err != nil {
 		return err
@@ -485,75 +604,4 @@ func (p *Podcast) fillEpisodeMap() {
 	for _, e := range p.Episodes {
 		p.episodesMap[e.Id] = e
 	}
-}
-
-func GetPodcast(config Config, id string) (*Podcast, error) {
-	filePath := filepath.Join(config.FileHome, id, podcastInfoFilename)
-	jsonFile, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer jsonFile.Close()
-
-	byteValue, err := ioutil.ReadAll(jsonFile)
-
-	if err != nil {
-		return nil, err
-	}
-
-	podcast := NewPodcastObj()
-
-	err = json.Unmarshal(byteValue, &podcast)
-	if err != nil {
-		return nil, err
-	}
-
-	podcast.fillEpisodeMap()
-
-	// Sort by publish date & read order
-	sort.Slice(podcast.Episodes, func(i, j int) bool {
-		if podcast.Episodes[i].PublishTimestamp == podcast.Episodes[j].PublishTimestamp {
-			return podcast.Episodes[i].ReadOrder > podcast.Episodes[j].ReadOrder
-		}
-
-		return podcast.Episodes[i].PublishTimestamp > podcast.Episodes[j].PublishTimestamp
-	})
-
-	podcast.LatestEpisode = podcast.Episodes[0]
-
-	return &podcast, nil
-
-}
-
-func ListPodcasts(config Config, includeEpisodes bool) ([]Podcast, error) {
-	files, err := ioutil.ReadDir(config.FileHome)
-
-	isAlpha := regexp.MustCompile(`^[a-z0-9]+$`).MatchString
-
-	if err != nil {
-		return nil, err
-	}
-
-	podcasts := make([]Podcast, 0)
-
-	for _, fileInfo := range files {
-		if fileInfo.IsDir() && isAlpha(fileInfo.Name()) {
-			podcast, err := GetPodcast(config, fileInfo.Name())
-			if err != nil {
-				return nil, err
-			}
-			if includeEpisodes {
-				podcast.fillEpisodeMap()
-			} else {
-				podcast.Episodes = nil
-			}
-			podcasts = append(podcasts, *podcast)
-		}
-	}
-
-	sort.Slice(podcasts, func(i, j int) bool {
-		return podcasts[i].LatestEpisode.PublishTimestamp > podcasts[j].LatestEpisode.PublishTimestamp
-	})
-
-	return podcasts, nil
 }

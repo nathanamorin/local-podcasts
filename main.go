@@ -36,13 +36,13 @@ func clientInfo(config podcast.Config, c echo.Context) (string, string) {
 	return key, filePath
 }
 
-func refresh(config podcast.Config, pw *podcast.PodcastWatcher) {
+func refresh(pw *podcast.PodcastWatcher) {
 	if !pw.QueueEmpty() {
 		klog.Infof("podcasts still in update queue, skipping cron update")
 		return
 	}
 
-	podcasts, err := podcast.ListPodcasts(config, true)
+	podcasts, err := pw.ListPodcasts()
 
 	if err != nil {
 		klog.Errorf("error listing podcasts on refresh: %s", err)
@@ -75,7 +75,7 @@ func main() {
 		}
 	}
 
-	pw := podcast.NewPodcastWatcher()
+	pw := podcast.NewPodcastWatcher(config)
 
 	pw.Run(config)
 	klog.Infof("started podcast watcher")
@@ -85,7 +85,7 @@ func main() {
 
 	_, err := s.Every(1).Hour().Do(func() {
 
-		refresh(config, &pw)
+		refresh(&pw)
 
 	})
 
@@ -100,7 +100,7 @@ func main() {
 	}
 
 	e.GET("/refresh", func(c echo.Context) error {
-		refresh(config, &pw)
+		refresh(&pw)
 		return c.JSON(http.StatusOK, map[string]string{
 			"status": "ok",
 		})
@@ -108,7 +108,11 @@ func main() {
 
 	e.GET("/podcasts", func(c echo.Context) error {
 
-		podcasts, err := podcast.ListPodcasts(config, false)
+		podcasts, err := pw.ListPodcasts()
+
+		for idx, _ := range podcasts {
+			podcasts[idx].Episodes = nil
+		}
 
 		if err != nil {
 			klog.Errorf("error listing podcasts: %s", err)
@@ -148,7 +152,7 @@ func main() {
 
 	e.GET("/podcasts/:podcast_id", func(c echo.Context) error {
 
-		podcastData, err := podcast.GetPodcast(config, c.Param("podcast_id"))
+		podcastData, err := pw.GetPodcast(c.Param("podcast_id"))
 
 		if err != nil {
 			klog.Errorf("error getting podcast: %s", err)
@@ -160,7 +164,7 @@ func main() {
 
 	e.GET("/podcasts/:podcast_id/image", func(c echo.Context) error {
 
-		podcastData, err := podcast.GetPodcast(config, c.Param("podcast_id"))
+		podcastData, err := pw.GetPodcast(c.Param("podcast_id"))
 
 		if err != nil {
 			klog.Errorf("error getting podcast: %s", err)
@@ -179,26 +183,9 @@ func main() {
 		return nil
 	})
 
-	e.GET("/podcasts/:podcast_id/update", func(c echo.Context) error {
-
-		podcastData, err := podcast.GetPodcast(config, c.Param("podcast_id"))
-		if err != nil {
-			klog.Errorf("error getting podcast: %s", err)
-			return c.String(http.StatusInternalServerError, "{\"error\": \"error getting podcast\"}")
-		}
-		err = podcastData.Update(config)
-
-		if err != nil {
-			klog.Errorf("error updating podcast: %s", err)
-			return c.String(http.StatusInternalServerError, "{\"error\": \"error updating podcast\"}")
-		}
-
-		return c.JSON(http.StatusOK, podcastData)
-	})
-
 	e.GET("/podcasts/:podcast_id/episodes/:episode_id/stream", func(c echo.Context) error {
 
-		podcastData, err := podcast.GetPodcast(config, c.Param("podcast_id"))
+		podcastData, err := pw.GetPodcast(c.Param("podcast_id"))
 
 		if err != nil {
 			klog.Errorf("error getting podcast: %s", err)
@@ -219,7 +206,7 @@ func main() {
 
 	e.GET("/rss/all", func(c echo.Context) error {
 
-		podcasts, err := podcast.ListPodcasts(config, true)
+		podcasts, err := pw.ListPodcasts()
 
 		if err != nil {
 			klog.Errorf("error getting podcast: %s", err)
