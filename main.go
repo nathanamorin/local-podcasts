@@ -6,17 +6,18 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/go-co-op/gocron"
-	"github.com/labstack/echo/v4"
-	"github.com/nathanamorin/local-podcasts/podcast"
 	"io/ioutil"
-	"k8s.io/klog/v2"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/go-co-op/gocron"
+	"github.com/labstack/echo/v4"
+	"github.com/nathanamorin/local-podcasts/podcast"
+	"k8s.io/klog/v2"
 )
 
 type podcastList struct {
@@ -51,6 +52,10 @@ func refresh(pw *podcast.PodcastWatcher) {
 			pw.EnqueuePodcast(p)
 		}
 	}
+}
+
+func configureStaticResponse(resp *echo.Response) {
+	resp.Header().Set("Cache-Control", "max-age=604800")
 }
 
 func main() {
@@ -179,6 +184,7 @@ func main() {
 		}
 
 		c.Response().Status = http.StatusOK
+		configureStaticResponse(c.Response())
 		http.ServeFile(c.Response().Writer, c.Request(), imagePath)
 		return nil
 	})
