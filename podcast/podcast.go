@@ -6,11 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gorilla/feeds"
-	"github.com/hajimehoshi/go-mp3"
-	"github.com/mmcdole/gofeed"
 	"io/ioutil"
-	"k8s.io/klog/v2"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,6 +16,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/feeds"
+	"github.com/hajimehoshi/go-mp3"
+	"github.com/mmcdole/gofeed"
+	"k8s.io/klog/v2"
 )
 
 const podcastInfoFilename = "info.json"
@@ -166,6 +167,9 @@ func (pw *PodcastWatcher) GetPodcast(id string) (*Podcast, error) {
 		return podcast.Episodes[i].PublishTimestamp > podcast.Episodes[j].PublishTimestamp
 	})
 
+	if len(podcast.Episodes) <= 0 {
+		return nil, fmt.Errorf("podcast with 0 episodes")
+	}
 	podcast.LatestEpisode = podcast.Episodes[0]
 
 	return &podcast, nil
