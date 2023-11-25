@@ -211,7 +211,8 @@ func (pw *PodcastWatcher) RefreshPodcastMetadataCache() ([]Podcast, error) {
 		if fileInfo.IsDir() && isAlpha(fileInfo.Name()) {
 			podcast, err := pw.GetPodcast(fileInfo.Name())
 			if err != nil {
-				return nil, err
+				klog.Errorf("error fetching podcast %s: %s", fileInfo.Name(), err)
+				continue
 			}
 			podcast.fillEpisodeMap()
 			podcasts = append(podcasts, *podcast)
