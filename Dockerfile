@@ -1,4 +1,4 @@
-FROM golang:1.17-alpine AS build
+FROM golang:1.26-alpine AS build
 
 # Set destination for COPY
 WORKDIR /build

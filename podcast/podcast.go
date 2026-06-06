@@ -3,14 +3,12 @@ package podcast
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,15 +18,16 @@ import (
 	"github.com/gorilla/feeds"
 	"github.com/hajimehoshi/go-mp3"
 	"github.com/mmcdole/gofeed"
+	"gorm.io/gorm"
 	"k8s.io/klog/v2"
 )
 
-const podcastInfoFilename = "info.json"
 const podcastImageFilenameNoExt = "image"
 
 type Episode struct {
+	PodcastID        string `json:"-" gorm:"primaryKey"`
+	Id               string `json:"id" gorm:"primaryKey"`
 	Name             string `json:"name"`
-	Id               string `json:"id"`
 	Description      string `json:"description"`
 	AudioFile        string `json:"audio_file"`
 	Length           int64  `json:"audio_length_sec"`
@@ -37,15 +36,15 @@ type Episode struct {
 }
 
 type Podcast struct {
-	Name              string `json:"name"`
-	Description       string `json:"description"`
-	Id                string `json:"id"`
-	ImageFile         string `json:"image_file"`
+	Id                string     `json:"id" gorm:"primaryKey"`
+	Name              string     `json:"name"`
+	Description       string     `json:"description"`
+	ImageFile         string     `json:"image_file"`
 	episodesMap       map[string]*Episode
-	Episodes          []*Episode `json:"episodes,omitempty"`
+	Episodes          []*Episode `json:"episodes,omitempty" gorm:"foreignKey:PodcastID;references:Id"`
 	RSSUrl            string     `json:"rss_url"`
 	DisableAutoUpdate bool       `json:"disable_auto_update,omitempty"`
-	LatestEpisode     *Episode   `json:"latest_episode"`
+	LatestEpisode     *Episode   `json:"latest_episode" gorm:"-"`
 }
 
 type Config struct {
@@ -59,11 +58,12 @@ type PodcastWatcher struct {
 	podcastsCache        []Podcast
 	podcastsCacheLock    sync.RWMutex
 	config               Config
+	db                   *gorm.DB
 }
 
 const threads = 5
 
-func NewPodcastWatcher(config Config) PodcastWatcher {
+func NewPodcastWatcher(config Config, db *gorm.DB) PodcastWatcher {
 	return PodcastWatcher{
 		podcastsToUpdate:     make(chan Podcast, 500),
 		currentDownloads:     make(map[string]int),
@@ -71,6 +71,7 @@ func NewPodcastWatcher(config Config) PodcastWatcher {
 		podcastsCache:        make([]Podcast, 0),
 		podcastsCacheLock:    sync.RWMutex{},
 		config:               config,
+		db:                   db,
 	}
 }
 
@@ -107,7 +108,7 @@ func (pw *PodcastWatcher) Run(config Config) {
 						klog.Infof("already updating podcast (%s), skipping", podcastToUpdate.Name)
 						return
 					}
-					err := podcastToUpdate.Update(config)
+					err := podcastToUpdate.Update(config, pw.db)
 					if err != nil {
 						klog.Errorf("error updating podcast (%s): %s", podcastToUpdate.Name, err)
 					}
@@ -130,30 +131,23 @@ func (pw *PodcastWatcher) QueueEmpty() bool {
 	return len(pw.podcastsToUpdate) == 0
 }
 
+func (pw *PodcastWatcher) InvalidateCache() {
+	pw.podcastsCacheLock.Lock()
+	defer pw.podcastsCacheLock.Unlock()
+	pw.podcastsCache = make([]Podcast, 0)
+}
+
 func (pw *PodcastWatcher) EnqueuePodcast(podcast Podcast) {
 	klog.Infof("enqueued podcast %s for update", podcast.Name)
 	pw.podcastsToUpdate <- podcast
 }
 
 func (pw *PodcastWatcher) GetPodcast(id string) (*Podcast, error) {
-	filePath := filepath.Join(pw.config.FileHome, id, podcastInfoFilename)
-	jsonFile, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer jsonFile.Close()
-
-	byteValue, err := ioutil.ReadAll(jsonFile)
-
-	if err != nil {
-		return nil, err
-	}
-
 	podcast := NewPodcastObj()
 
-	err = json.Unmarshal(byteValue, &podcast)
-	if err != nil {
-		return nil, err
+	result := pw.db.Preload("Episodes").Where("id = ?", id).First(&podcast)
+	if result.Error != nil {
+		return nil, result.Error
 	}
 
 	podcast.fillEpisodeMap()
@@ -197,29 +191,32 @@ func (pw *PodcastWatcher) ListPodcasts() ([]Podcast, error) {
 func (pw *PodcastWatcher) RefreshPodcastMetadataCache() ([]Podcast, error) {
 	pw.podcastsCacheLock.Lock()
 	defer pw.podcastsCacheLock.Unlock()
-	files, err := ioutil.ReadDir(pw.config.FileHome)
 
-	isAlpha := regexp.MustCompile(`^[a-z0-9]+$`).MatchString
-
-	if err != nil {
-		return nil, err
+	var podcasts []Podcast
+	result := pw.db.Preload("Episodes").Find(&podcasts)
+	if result.Error != nil {
+		return nil, result.Error
 	}
 
-	podcasts := make([]Podcast, 0)
+	for idx := range podcasts {
+		podcasts[idx].fillEpisodeMap()
 
-	for _, fileInfo := range files {
-		if fileInfo.IsDir() && isAlpha(fileInfo.Name()) {
-			podcast, err := pw.GetPodcast(fileInfo.Name())
-			if err != nil {
-				klog.Errorf("error fetching podcast %s: %s", fileInfo.Name(), err)
-				continue
+		sort.Slice(podcasts[idx].Episodes, func(i, j int) bool {
+			if podcasts[idx].Episodes[i].PublishTimestamp == podcasts[idx].Episodes[j].PublishTimestamp {
+				return podcasts[idx].Episodes[i].ReadOrder > podcasts[idx].Episodes[j].ReadOrder
 			}
-			podcast.fillEpisodeMap()
-			podcasts = append(podcasts, *podcast)
+			return podcasts[idx].Episodes[i].PublishTimestamp > podcasts[idx].Episodes[j].PublishTimestamp
+		})
+
+		if len(podcasts[idx].Episodes) > 0 {
+			podcasts[idx].LatestEpisode = podcasts[idx].Episodes[0]
 		}
 	}
 
 	sort.Slice(podcasts, func(i, j int) bool {
+		if podcasts[i].LatestEpisode == nil || podcasts[j].LatestEpisode == nil {
+			return false
+		}
 		return podcasts[i].LatestEpisode.PublishTimestamp > podcasts[j].LatestEpisode.PublishTimestamp
 	})
 
@@ -373,7 +370,7 @@ func (p *Podcast) mergeNewInfo(newPodcast *Podcast) {
 	p.Description = newPodcast.Description
 }
 
-func AddPodcast(config Config, RSSUrl string) (*Podcast, error) {
+func AddPodcast(config Config, db *gorm.DB, RSSUrl string) (*Podcast, error) {
 	podcast := NewPodcastObj()
 	podcast.RSSUrl = RSSUrl
 	feedData, err := podcast.readCurrentFeed()
@@ -382,9 +379,11 @@ func AddPodcast(config Config, RSSUrl string) (*Podcast, error) {
 	}
 
 	newPodcastInfo, err := parsePodcastRss(feedData, podcast.RSSUrl)
-
-	err = newPodcastInfo.SavePodcastMetadata(config)
 	if err != nil {
+		return nil, fmt.Errorf("error parsing podcast rss: %s", err)
+	}
+
+	if err = newPodcastInfo.SavePodcastMetadata(config, db); err != nil {
 		return nil, err
 	}
 
@@ -443,7 +442,7 @@ func (p *Podcast) syncNewData(feedData string) error {
 	return nil
 }
 
-func (p *Podcast) Update(config Config) error {
+func (p *Podcast) Update(config Config, db *gorm.DB) error {
 
 	klog.Infof("updating podcast: %s", p.Name)
 
@@ -453,7 +452,6 @@ func (p *Podcast) Update(config Config) error {
 	}
 
 	err = p.syncNewData(feedData)
-
 	if err != nil {
 		return fmt.Errorf("error syncing new data into existing podcast data: %s", err)
 	}
@@ -462,18 +460,34 @@ func (p *Podcast) Update(config Config) error {
 		return err
 	}
 
-	for _, ep := range p.Episodes {
-		err := p.SyncPodcastEpisode(config, ep)
-		if err != nil {
-			return fmt.Errorf("error saving episode: %s", err)
-		}
-		err = p.SavePodcastMetadata(config)
-		if err != nil {
-			return fmt.Errorf("error saving info after saving episode: %s", err)
-		}
-
+	// Persist all episode metadata immediately (with remote audio URLs) so the
+	// podcast is queryable before any audio files finish downloading.
+	if err = p.SavePodcastMetadata(config, db); err != nil {
+		return fmt.Errorf("error saving metadata before episode sync: %s", err)
 	}
 
+	const episodeThreads = 5
+	sem := make(chan struct{}, episodeThreads)
+	var wg sync.WaitGroup
+
+	for _, ep := range p.Episodes {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(ep *Episode) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if err := p.SyncPodcastEpisode(config, ep); err != nil {
+				klog.Errorf("error syncing episode %s: %s", ep.Name, err)
+				return
+			}
+			if err := p.SavePodcastMetadata(config, db); err != nil {
+				klog.Errorf("error saving metadata after episode sync %s: %s", ep.Name, err)
+			}
+		}(ep)
+	}
+
+	wg.Wait()
 	return nil
 }
 
@@ -560,7 +574,7 @@ func (p *Podcast) SyncPodcastEpisode(config Config, episode *Episode) error {
 
 }
 
-func (p *Podcast) SavePodcastMetadata(config Config) error {
+func (p *Podcast) SavePodcastMetadata(config Config, db *gorm.DB) error {
 
 	if err := p.checkPodcastDirExists(config); err != nil {
 		return err
@@ -587,19 +601,16 @@ func (p *Podcast) SavePodcastMetadata(config Config) error {
 			}
 
 			p.ImageFile = imageFileName
-
 		}
 	}
 
-	jsonData, _ := json.MarshalIndent(p, "", " ")
-
-	err := ioutil.WriteFile(filepath.Join(config.FileHome, p.Id, podcastInfoFilename), jsonData, 0764)
-
-	if err != nil {
-		return err
+	// Ensure all episodes have the correct PodcastID set before saving.
+	for _, ep := range p.Episodes {
+		ep.PodcastID = p.Id
 	}
 
-	return nil
+	result := db.Session(&gorm.Session{FullSaveAssociations: true}).Save(p)
+	return result.Error
 }
 
 func (p *Podcast) fillEpisodeMap() {
