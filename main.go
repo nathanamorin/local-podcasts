@@ -43,6 +43,10 @@ func main() {
 		klog.Fatalf("error initializing database: %s", err)
 	}
 
+	if err := podcast.MigrateFromFiles(config, db); err != nil {
+		klog.Errorf("error running file migration: %s", err)
+	}
+
 	pw := podcast.NewPodcastWatcher(config, db)
 	pw.Run(config)
 	klog.Infof("started podcast watcher")
