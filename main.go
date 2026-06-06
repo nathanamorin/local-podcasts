@@ -52,7 +52,7 @@ func main() {
 	h.Register(e)
 
 	s := gocron.NewScheduler(time.UTC)
-	if _, err = s.Every(1).Hour().Do(h.EnqueueAll); err != nil {
+	if _, err = s.Every(10).Minutes().Do(h.EnqueueAll); err != nil {
 		klog.Errorf("error setting up cron job refresh: %s", err)
 	}
 	s.StartAsync()
