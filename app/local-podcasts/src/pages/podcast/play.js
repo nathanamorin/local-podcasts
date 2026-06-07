@@ -1,5 +1,5 @@
 import { createRef, useEffect, useState, useCallback } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Grommet, Box, Heading, Paragraph, Button, Text } from 'grommet'
 import { Previous, Play, Pause } from 'grommet-icons'
 import { Cast } from 'react-feather';
@@ -14,6 +14,7 @@ import { useKeyPress, getClientInfo, setClientInfo } from '../utils'
 export function PlayPodcast() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { podcastId, episodeId } = useParams()
   const [player, setPlayer] = useState(null)
   const cast = useCast({
       initialize_media_player: "DEFAULT_MEDIA_RECEIVER_APP_ID",
@@ -28,32 +29,33 @@ export function PlayPodcast() {
   const [chromecastPlaying, setChromecastPlaying] = useState(false)
 
   useEffect(async () => {
-      let newEpisode = null
-      let newPodcast = null
-      // Check if state exists
-      if (location.state === null 
-        || location.state.episode === null 
-        || location.state.podcast === null) {
-          const epFromStorage = localStorage.getItem('currentEpisode')
-          const podcastFromStorage = localStorage.getItem('currentPodcast')
+      // If state was passed via navigation, use it directly
+      if (location.state !== null
+        && location.state.episode !== null
+        && location.state.podcast !== null) {
+        setPodcast(location.state.podcast)
+        setEpisode(location.state.episode)
+        setEpisodes(location.state.episodes || [])
+        return
+      }
 
-          if (epFromStorage === null || podcastFromStorage === null) {
+      // Otherwise fetch data using URL params
+      fetch(`/podcasts/${podcastId}`)
+        .then(res => res.json())
+        .then(data => {
+          setPodcast(data)
+          const episodes = data.episodes || []
+          setEpisodes(episodes)
+          const ep = episodes.find(e => e.id === episodeId)
+          if (ep) {
+            setEpisode(ep)
+          } else {
             window.location.href = "/"
           }
-
-          newEpisode = JSON.parse(epFromStorage)
-          newPodcast = JSON.parse(podcastFromStorage)
-    } else {
-      newPodcast = location.state.podcast
-      newEpisode = location.state.episode
-      setEpisodes(location.state.episodes)
-      localStorage.setItem('currentEpisode', JSON.stringify(newEpisode))
-      localStorage.setItem('currentPodcast', JSON.stringify(newPodcast))
-    }
-
-
-    setEpisode(newEpisode)
-    setPodcast(newPodcast)
+        })
+        .catch(() => {
+          window.location.href = "/"
+        })
   }, [])
 
 

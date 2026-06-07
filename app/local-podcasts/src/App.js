@@ -21,8 +21,8 @@ function App() {
                 <Routes>
                   <Route path="/" element={<Index />}/>
                   <Route path="/user-info" element={<UserInfo />}/>
-                  <Route path="/podcast" element={<Podcast />}/>
-                  <Route path="/podcast/play" element={<PlayPodcast />}/>
+                  <Route path="/podcast/:podcastId" element={<Podcast />}/>
+                  <Route path="/podcast/:podcastId/episode/:episodeId" element={<PlayPodcast />}/>
                   <Route path="/podcast/add" element={<AddPodcast />}/>
                 </Routes>
               </Router>

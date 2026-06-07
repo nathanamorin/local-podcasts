@@ -83,7 +83,14 @@ func main() {
 	}
 	s.StartAsync()
 
-	e.Static("/", "static")
+	// Serve static files and fall back to index.html for SPA client-side routes.
+	e.GET("/*", func(c echo.Context) error {
+		p := filepath.Join("static", c.Param("*"))
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return c.File(p)
+		}
+		return c.File("static/index.html")
+	})
 
 	if err := e.Start(cfg.Addr); err != http.ErrServerClosed {
 		log.Fatal(err)

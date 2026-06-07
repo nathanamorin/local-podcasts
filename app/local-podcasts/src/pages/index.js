@@ -112,8 +112,7 @@ export function Index() {
                           setClientInfo(starredPodcastsKey, JSON.stringify(newStars))
                         }}/>
                       </Box>
-                      <Link to="/podcast"
-                        state={{ podcast: podcast }}
+                      <Link to={`/podcast/${podcast.id}`}
                         style={{ textDecoration: 'none' }}
                       >
                         <Box align="center" justify="center" pad="xsmall" margin="xsmall">

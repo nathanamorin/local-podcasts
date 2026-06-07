@@ -1,34 +1,30 @@
 import React, { useState, useEffect } from 'react'
 import { Grommet, Box, InfiniteScroll, Button, Text, Heading, Paragraph, TextInput } from 'grommet'
 import { Play, Previous } from 'grommet-icons'
-import { Link, useLocation, useNavigate } from "react-router-dom"
+import { Link, useParams, useNavigate } from "react-router-dom"
 import { theme, background, cardBackground } from './theme'
 import { getClientInfo, setClientInfo, deleteClientInfo } from './utils'
 
 
-const playedEpisodesKey = "played-episodes"
-
-
 export function Podcast() {
-  const location = useLocation()
+  const { podcastId } = useParams()
   const navigate = useNavigate()
-  const podcast = location.state.podcast
 
+  const [podcast, setPodcast] = useState(null)
   const [episodes, setEpisodes] = useState([])
 
   const [playedEpisodes, setPlayedEpisode] = useState({})
 
   const [searchText, setSearchText] = useState("")
 
-  const playedEpisodesKey = `played-episodes-${podcast.id}`
+  const playedEpisodesKey = `played-episodes-${podcastId}`
 
   useEffect(async () => {
-    fetch(`/podcasts/${podcast.id}`)
+    fetch(`/podcasts/${podcastId}`)
+      .then(data => data.json())
       .then(data => {
-        return data.json()
-      })
-      .then(data => {
-        setEpisodes(data.episodes)
+        setPodcast(data)
+        setEpisodes(data.episodes || [])
       })
       .catch(err => {
         console.log(err)
@@ -42,11 +38,9 @@ export function Podcast() {
           playedEpData = JSON.parse(data)
           for (const id in playedEpData) {
             if (playedEpData[id] === null) {
-              playedEpData[id] = await getClientInfo(`${podcast.id}-${id}`)
+              playedEpData[id] = await getClientInfo(`${podcastId}-${id}`)
             }
           }
-
-
         } catch (ex) {
           console.log(ex)
           playedEpData = {}
@@ -86,17 +80,19 @@ export function Podcast() {
       <Box justify="center" align="start" fill="horizontal">
         <Button onClick={() => navigate(-1)} justify="start" icon={<Previous />}/>
       </Box>
-        <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
-          <Box align="center" justify="center" pad="xsmall" margin="xsmall">
-            <Box align="center" justify="center" background={{ "dark": false, "color": "light-2", "image": `url('/podcasts/${podcast.id}/image')` }} round="xsmall" margin="medium" fill="vertical" pad="xlarge" />
-            <Heading level="2" size="medium" margin="xsmall" textAlign="center">
-              {podcast.name}
-            </Heading>
-            <Paragraph size="small" margin="medium" textAlign="center">
-              {podcast.description.replace(/(<([^>]+)>)/gi, "")}
-            </Paragraph>
+        {podcast && (
+          <Box align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
+            <Box align="center" justify="center" pad="xsmall" margin="xsmall">
+              <Box align="center" justify="center" background={{ "dark": false, "color": "light-2", "image": `url('/podcasts/${podcast.id}/image')` }} round="xsmall" margin="medium" fill="vertical" pad="xlarge" />
+              <Heading level="2" size="medium" margin="xsmall" textAlign="center">
+                {podcast.name}
+              </Heading>
+              <Paragraph size="small" margin="medium" textAlign="center">
+                {podcast.description.replace(/(<([^>]+)>)/gi, "")}
+              </Paragraph>
+            </Box>
           </Box>
-        </Box>
+        )}
         <TextInput
           placeholder="Search"
           value={searchText}
@@ -108,8 +104,8 @@ export function Podcast() {
         <Box fill="horizontal" pad={{top: "medium"}}>
           <InfiniteScroll items={searchedEpisodes} pad="small">
             {(episode) => (
-              <Link key={episode.id} to="/podcast/play" 
-              state={{ podcast: podcast, episode: episode, episodes: searchedEpisodes }} 
+              <Link key={episode.id} to={`/podcast/${podcastId}/episode/${episode.id}`}
+              state={{ podcast: podcast, episode: episode, episodes: searchedEpisodes }}
               style={{ textDecoration: 'none' }}
               onClick={() => {
                 const newPlayed = {...playedEpisodes}
