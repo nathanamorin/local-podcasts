@@ -139,16 +139,36 @@ func (h *Handler) GetPodcastImage(c echo.Context) error {
 }
 
 func (h *Handler) StreamEpisode(c echo.Context) error {
-	podcastData, err := h.pw.GetPodcast(c.Param("podcast_id"))
+	podcastID := c.Param("podcast_id")
+	episodeID := c.Param("episode_id")
+
+	podcastData, err := h.pw.GetPodcast(podcastID)
 	if err != nil {
-		klog.Errorf("error getting podcast: %s", err)
+		klog.Errorf("error getting podcast %s: %s", podcastID, err)
 		return c.String(http.StatusInternalServerError, `{"error": "error getting podcast"}`)
 	}
 
-	filePath, err := podcastData.GetAudioFile(h.config, c.Param("episode_id"))
+	filePath, err := podcastData.GetAudioFile(h.config, episodeID)
 	if err != nil {
-		klog.Errorf("error getting stream: %s", err)
+		klog.Errorf("error getting audio file for episode %s/%s: %s", podcastID, episodeID, err)
 		return c.String(http.StatusInternalServerError, `{"error": "error getting stream"}`)
+	}
+
+	// Validate the file is readable, non-empty, and actually audio (not an HTML/text error page).
+	info, err := os.Stat(filePath)
+	if err != nil || info.Size() == 0 {
+		klog.Warningf("audio file missing or empty for episode %s/%s (%s), requeuing for download",
+			podcastID, episodeID, filePath)
+		h.requeueWithWarn(podcastID, episodeID)
+		return c.String(http.StatusServiceUnavailable, `{"error": "episode not yet downloaded, queued for re-download"}`)
+	}
+
+	if err := podcast.ValidateAudioFile(filePath); err != nil {
+		klog.Warningf("audio file invalid for episode %s/%s (%s): %s — requeuing for download",
+			podcastID, episodeID, filePath, err)
+		os.Remove(filePath)
+		h.requeueWithWarn(podcastID, episodeID)
+		return c.String(http.StatusServiceUnavailable, `{"error": "episode file invalid, queued for re-download"}`)
 	}
 
 	c.Response().Status = http.StatusOK
@@ -248,4 +268,10 @@ func (h *Handler) DeleteClientStatus(c echo.Context) error {
 	}
 
 	return c.JSONBlob(http.StatusOK, []byte(`{"status": "success"}`))
+}
+
+func (h *Handler) requeueWithWarn(podcastID, episodeID string) {
+	if err := h.pw.RequeueEpisodeDownload(podcastID, episodeID); err != nil {
+		klog.Errorf("requeue failed for episode %s/%s: %s", podcastID, episodeID, err)
+	}
 }

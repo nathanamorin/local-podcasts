@@ -24,12 +24,39 @@ import (
 
 const podcastImageFilenameNoExt = "image"
 
+// ValidateAudioFile reads the first 512 bytes of a file and returns an error
+// if the detected content type is text-based (i.e. an HTML/JSON error page
+// was saved instead of audio data).
+func ValidateAudioFile(filePath string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("open: %w", err)
+	}
+	defer f.Close()
+
+	buf := make([]byte, 512)
+	n, err := f.Read(buf)
+	if err != nil {
+		return fmt.Errorf("read header: %w", err)
+	}
+
+	contentType := http.DetectContentType(buf[:n])
+	if strings.HasPrefix(contentType, "text/") {
+		return fmt.Errorf("file content type is %q, expected audio", contentType)
+	}
+
+	return nil
+}
+
+
+
 type Episode struct {
 	PodcastID        string `json:"-" gorm:"primaryKey"`
 	Id               string `json:"id" gorm:"primaryKey"`
 	Name             string `json:"name"`
 	Description      string `json:"description"`
 	AudioFile        string `json:"audio_file"`
+	RSSAudioURL      string `json:"rss_audio_url"`
 	Length           int64  `json:"audio_length_sec"`
 	ReadOrder        int    `json:"read_order"`
 	PublishTimestamp int64  `json:"publish_timestamp"`
@@ -135,6 +162,34 @@ func (pw *PodcastWatcher) InvalidateCache() {
 	pw.podcastsCacheLock.Lock()
 	defer pw.podcastsCacheLock.Unlock()
 	pw.podcastsCache = make([]Podcast, 0)
+}
+
+// RequeueEpisodeDownload resets the episode's local AudioFile back to its
+// original RSS URL and re-enqueues the podcast for download.
+func (pw *PodcastWatcher) RequeueEpisodeDownload(podcastID, episodeID string) error {
+	var ep Episode
+	if err := pw.db.Where("podcast_id = ? AND id = ?", podcastID, episodeID).First(&ep).Error; err != nil {
+		return fmt.Errorf("episode %s not found: %w", episodeID, err)
+	}
+
+	if ep.RSSAudioURL == "" {
+		return fmt.Errorf("episode %s has no RSS audio URL stored, cannot requeue", episodeID)
+	}
+
+	ep.AudioFile = ep.RSSAudioURL
+	ep.Length = 0
+	if err := pw.db.Save(&ep).Error; err != nil {
+		return fmt.Errorf("reset episode %s audio file: %w", episodeID, err)
+	}
+
+	p, err := pw.GetPodcast(podcastID)
+	if err != nil {
+		return fmt.Errorf("get podcast %s for requeue: %w", podcastID, err)
+	}
+
+	klog.Infof("requeuing episode %q of podcast %q for re-download", ep.Name, p.Name)
+	pw.EnqueuePodcast(*p)
+	return nil
 }
 
 func (pw *PodcastWatcher) EnqueuePodcast(podcast Podcast) {
@@ -318,6 +373,7 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 			Id:               id,
 			Description:      item.Description,
 			AudioFile:        audio.URL,
+				RSSAudioURL:      audio.URL,
 			ReadOrder:        i,
 			PublishTimestamp: publishedTime.Unix(),
 			Length:           audioLength,
@@ -575,6 +631,11 @@ func (p *Podcast) SyncPodcastEpisode(config Config, episode *Episode) error {
 		if n == 0 {
 			os.Remove(episodeFilePath)
 			return fmt.Errorf("episode %q downloaded 0 bytes from %s", episode.Name, episode.AudioFile)
+		}
+
+		if err := ValidateAudioFile(episodeFilePath); err != nil {
+			os.Remove(episodeFilePath)
+			return fmt.Errorf("episode %q failed audio validation (likely error page): %w", episode.Name, err)
 		}
 
 		episode.AudioFile = episodeFilename
