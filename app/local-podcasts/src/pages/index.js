@@ -130,11 +130,9 @@ export function Index() {
                 )
               }
               return (
-                
                 <Box fill="horizontal" direction="row" align="center" justify="center" wrap={true}>
                 {row}
                 </Box>
-
                 )
                 }
           }
