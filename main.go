@@ -47,6 +47,10 @@ func main() {
 
 	podcastConfig := podcast.Config{FileHome: cfg.FileHome}
 
+	if err := os.MkdirAll(cfg.FileHome, 0764); err != nil {
+		klog.Fatalf("error creating file home directory: %s", err)
+	}
+
 	userDataDir := filepath.Join(cfg.FileHome, handlers.UserDataPath)
 	if _, err := os.Stat(userDataDir); errors.Is(err, os.ErrNotExist) {
 		if err := os.Mkdir(userDataDir, 0764); err != nil {
