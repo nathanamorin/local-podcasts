@@ -444,6 +444,11 @@ func (p *Podcast) syncNewData(feedData string) error {
 	return nil
 }
 
+func (p *Podcast) saveEpisode(ep *Episode, db *gorm.DB) error {
+	ep.PodcastID = p.Id
+	return db.Save(ep).Error
+}
+
 func (p *Podcast) Update(config Config, db *gorm.DB) error {
 
 	klog.Infof("updating podcast: %s", p.Name)
@@ -462,7 +467,7 @@ func (p *Podcast) Update(config Config, db *gorm.DB) error {
 		return err
 	}
 
-	// Persist all episode metadata immediately (with remote audio URLs) so the
+	// Persist podcast + all episode metadata immediately (remote URLs) so the
 	// podcast is queryable before any audio files finish downloading.
 	if err = p.SavePodcastMetadata(config, db); err != nil {
 		return fmt.Errorf("error saving metadata before episode sync: %s", err)
@@ -483,8 +488,10 @@ func (p *Podcast) Update(config Config, db *gorm.DB) error {
 				klog.Errorf("error syncing episode %s: %s", ep.Name, err)
 				return
 			}
-			if err := p.SavePodcastMetadata(config, db); err != nil {
-				klog.Errorf("error saving metadata after episode sync %s: %s", ep.Name, err)
+			// Save only this episode — avoids concurrent reads/writes on the
+			// shared Podcast struct that SavePodcastMetadata would cause.
+			if err := p.saveEpisode(ep, db); err != nil {
+				klog.Errorf("error saving episode %s: %s", ep.Name, err)
 			}
 		}(ep)
 	}
@@ -494,86 +501,106 @@ func (p *Podcast) Update(config Config, db *gorm.DB) error {
 }
 
 func getAudioLength(audioFile string) (int64, error) {
+	info, err := os.Stat(audioFile)
+	if err != nil {
+		return -1, fmt.Errorf("stat %s: %w", audioFile, err)
+	}
+	if info.Size() == 0 {
+		return -1, fmt.Errorf("audio file is empty: %s", audioFile)
+	}
+
 	r, err := os.Open(audioFile)
 	if err != nil {
-		klog.Errorf("error opening mp3 file to find lenght: %s", err)
-		return -1, err
+		return -1, fmt.Errorf("open %s: %w", audioFile, err)
 	}
+	defer r.Close()
 
 	d, err := mp3.NewDecoder(r)
 	if err != nil {
-		klog.Errorf("error decoding mp3 file to find lenght: %s", err)
-		return -1, err
+		return -1, fmt.Errorf("decode mp3 %s (size=%d): %w", audioFile, info.Size(), err)
 	}
 
-	const sampleSize = int64(4)                 // From documentation.
-	samples := d.Length() / sampleSize          // Number of samples.
-	return samples / int64(d.SampleRate()), nil // Audio length in seconds.
+	const sampleSize = int64(4)
+	samples := d.Length() / sampleSize
+	return samples / int64(d.SampleRate()), nil
 }
 
 func (p *Podcast) SyncPodcastEpisode(config Config, episode *Episode) error {
 
 	if strings.HasPrefix(episode.AudioFile, "http") {
-		// Download podcast episode
 		if err := p.checkPodcastDirExists(config); err != nil {
 			return err
 		}
-		klog.Infof("downloading podcast: %s -> %s", p.Name, episode.Name)
+
+		klog.Infof("downloading episode: %s -> %s", p.Name, episode.Name)
+
 		resp, err := http.Get(episode.AudioFile)
 		if err != nil {
-			return err
+			return fmt.Errorf("GET %s: %w", episode.AudioFile, err)
 		}
 		defer resp.Body.Close()
 
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected HTTP %d downloading episode %q from %s",
+				resp.StatusCode, episode.Name, episode.AudioFile)
+		}
+
 		fileExtension := filepath.Ext(episode.AudioFile)
 		if fileExtension == "" {
-			// Assume mp3 if ext not defined
 			fileExtension = ".mp3"
 		}
 		fileExtension = strings.Split(fileExtension, "?")[0]
 		episodeFilename := episode.Id + fileExtension
-
 		episodeFilePath := filepath.Join(config.FileHome, p.Id, episodeFilename)
 
+		// Remove any existing (possibly partial) file before writing.
 		if _, err := os.Stat(episodeFilePath); !errors.Is(err, os.ErrNotExist) {
-			err := os.Remove(episodeFilePath)
-			if err != nil {
-				return err
+			if err := os.Remove(episodeFilePath); err != nil {
+				return fmt.Errorf("remove existing file %s: %w", episodeFilePath, err)
 			}
 		}
 
 		file, err := os.Create(episodeFilePath)
 		if err != nil {
-			return err
+			return fmt.Errorf("create %s: %w", episodeFilePath, err)
 		}
-		defer file.Close()
 
-		_, err = file.ReadFrom(resp.Body)
+		n, err := file.ReadFrom(resp.Body)
+		file.Close()
 		if err != nil {
-			return err
+			os.Remove(episodeFilePath)
+			return fmt.Errorf("write episode %q to %s (wrote %d bytes): %w",
+				episode.Name, episodeFilePath, n, err)
+		}
+		if n == 0 {
+			os.Remove(episodeFilePath)
+			return fmt.Errorf("episode %q downloaded 0 bytes from %s", episode.Name, episode.AudioFile)
 		}
 
 		episode.AudioFile = episodeFilename
-		klog.Infof("finished downloading podcast: %s -> %s", p.Name, episode.Name)
+		klog.Infof("downloaded episode: %s -> %s (%d bytes)", p.Name, episode.Name, n)
 	}
 
 	if episode.Length <= 0 {
 		audioFile, err := p.GetAudioFile(config, episode.Id)
 		if err != nil {
-			klog.Errorf("error finding mp3 file to find length: %s", err)
-			return err
+			return fmt.Errorf("locate audio file for episode %q: %w", episode.Name, err)
 		}
-		audioLength, err := getAudioLength(audioFile)
 
+		audioLength, err := getAudioLength(audioFile)
 		if err != nil {
-			klog.Errorf("error fetching audio metadata: %s", err)
-			return err
+			// Non-fatal: length is cosmetic. Log, delete corrupt file so it
+			// re-downloads next cycle, and continue.
+			klog.Warningf("could not determine length of %q (%s), file may be corrupt — deleting for re-download: %s",
+				episode.Name, audioFile, err)
+			os.Remove(audioFile)
+			episode.AudioFile = strings.TrimPrefix(episode.AudioFile, filepath.Base(audioFile))
+			return nil
 		}
 		episode.Length = audioLength
 	}
 
 	return nil
-
 }
 
 func (p *Podcast) SavePodcastMetadata(config Config, db *gorm.DB) error {
