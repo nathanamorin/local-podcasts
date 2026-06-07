@@ -10,7 +10,6 @@
     "grommet": "^2.20.1",
     "html5-qrcode": "^2.1.6",
     "react": "^17.0.2",
-    "react-chromecast": "^0.0.5-alpha",
     "react-dom": "^17.0.2",
     "react-feather": "^2.0.9",
     "react-h5-audio-player": "^3.8.1",
