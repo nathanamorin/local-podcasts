@@ -53,6 +53,7 @@ func (h *Handler) Register(e *echo.Echo) {
 
 	e.GET("/openapi.json", h.OpenAPISpec)
 	e.GET("/doc", h.APIDocs)
+	e.GET("/docs", h.APIDocs)
 
 	// These status endpoints are not intended to provide secure user data management.
 	// The only data stored are podcast status, played, etc. In the intended local

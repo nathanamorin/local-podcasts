@@ -69,6 +69,7 @@ func (h *Handler) OpenAPISpec(c echo.Context) error {
 // @Produce      html
 // @Success      200
 // @Router       /doc [get]
+// @Router       /docs [get]
 func (h *Handler) APIDocs(c echo.Context) error {
 	return c.HTML(http.StatusOK, redocHTML)
 }
