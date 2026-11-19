@@ -60,7 +60,7 @@ func FindAdCandidates(db *gorm.DB, maxHamming int, minClusterChunks int) ([]AdCa
 	const prefixShift = 40 // top 24 of 64 bits
 	buckets := make(map[uint64][]EpisodeFingerprint)
 	for _, fp := range fps {
-		key := fp.Hash >> prefixShift
+		key := fp.Hash.Uint64() >> prefixShift
 		buckets[key] = append(buckets[key], fp)
 	}
 
@@ -72,7 +72,7 @@ func FindAdCandidates(db *gorm.DB, maxHamming int, minClusterChunks int) ([]AdCa
 				if a.EpisodeID == b.EpisodeID {
 					continue // only cross-episode matches indicate shared content like ads
 				}
-				if fingerprint.HammingDistance(a.Hash, b.Hash) <= maxHamming {
+				if fingerprint.HammingDistance(a.Hash.Uint64(), b.Hash.Uint64()) <= maxHamming {
 					matches = append(matches, fingerprintMatch{a, b})
 				}
 			}

@@ -108,7 +108,10 @@ func TestCompleteJob_FingerprintSuccess_WritesChunksIdempotently(t *testing.T) {
 	require.NotNil(t, job)
 
 	result, err := json.Marshal(FingerprintJobResult{Chunks: []FingerprintChunk{
-		{StartSec: 0, Hash: 1},
+		// A hash with the high bit set reproduces a real SQLite driver
+		// failure ("uint64 values with high bit set are not supported")
+		// unless EpisodeFingerprint.Hash is stored via HashBits.
+		{StartSec: 0, Hash: 0xFFFFFFFFFFFFFFFF},
 		{StartSec: 2, Hash: 2},
 	}})
 	require.NoError(t, err)
@@ -117,6 +120,10 @@ func TestCompleteJob_FingerprintSuccess_WritesChunksIdempotently(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&EpisodeFingerprint{}).Where("episode_id = ?", "ep1").Count(&count).Error)
 	assert.Equal(t, int64(2), count)
+
+	var highBitFP EpisodeFingerprint
+	require.NoError(t, db.Where("episode_id = ? AND start_sec = ?", "ep1", float64(0)).First(&highBitFP).Error)
+	assert.Equal(t, uint64(0xFFFFFFFFFFFFFFFF), highBitFP.Hash.Uint64())
 
 	// Re-running fingerprinting for the same episode should replace, not
 	// duplicate, prior chunks (idempotent re-runs / backfill).

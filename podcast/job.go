@@ -1,6 +1,7 @@
 package podcast
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -59,15 +60,43 @@ type Job struct {
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
+// HashBits is a 64-bit audio-fingerprint hash (see the fingerprint package).
+// It's stored as its bit-for-bit reinterpreted int64, because database/sql
+// drivers (including SQLite) only accept int64 driver.Values - a uint64 with
+// the high bit set (true for ~half of all hash values) fails with
+// "uint64 values with high bit set are not supported". Use Uint64() to get
+// the value back out for bitwise comparisons (Hamming distance, bucketing).
+type HashBits uint64
+
+func (h HashBits) Value() (driver.Value, error) {
+	return int64(h), nil
+}
+
+func (h *HashBits) Scan(src interface{}) error {
+	i, ok := src.(int64)
+	if !ok {
+		return fmt.Errorf("HashBits.Scan: unsupported source type %T", src)
+	}
+	*h = HashBits(i)
+	return nil
+}
+
+// Uint64 returns the hash's bit pattern as an unsigned integer, for use in
+// bitwise comparisons (the DB-storage representation is intentionally a
+// bit-reinterpreted int64 - see HashBits).
+func (h HashBits) Uint64() uint64 {
+	return uint64(h)
+}
+
 // EpisodeFingerprint is one overlapping-window audio fingerprint (see the
 // fingerprint package for how the hash is computed) for a given episode,
 // used to detect segments (e.g. ads) shared across episodes.
 type EpisodeFingerprint struct {
-	ID        uint    `json:"-" gorm:"primaryKey;autoIncrement"`
-	PodcastID string  `json:"podcast_id" gorm:"index"`
-	EpisodeID string  `json:"episode_id" gorm:"index"`
-	StartSec  float64 `json:"start_sec"`
-	Hash      uint64  `json:"hash" gorm:"index"`
+	ID        uint     `json:"-" gorm:"primaryKey;autoIncrement"`
+	PodcastID string   `json:"podcast_id" gorm:"index"`
+	EpisodeID string   `json:"episode_id" gorm:"index"`
+	StartSec  float64  `json:"start_sec"`
+	Hash      HashBits `json:"hash" gorm:"index"`
 }
 
 // enqueueJob creates a pending job for the given episode, unless one of the
@@ -282,7 +311,7 @@ func applyFingerprintResult(db *gorm.DB, job *Job, result json.RawMessage) error
 			PodcastID: job.PodcastID,
 			EpisodeID: job.EpisodeID,
 			StartSec:  c.StartSec,
-			Hash:      c.Hash,
+			Hash:      HashBits(c.Hash),
 		})
 	}
 	return db.CreateInBatches(rows, 200).Error
