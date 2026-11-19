@@ -35,12 +35,13 @@ func RecordEpisodeDownload(podcastName string, status EpisodeDownloadStatus) {
 	EpisodeDownloadsTotal.WithLabelValues(podcastName, string(status)).Inc()
 }
 
-// PendingJobsGauge, ProcessingJobsGauge, and FailedJobsGauge track the
-// background job queue (episode downloads + fingerprinting, performed by
-// separate worker pods) by job type, so dashboards/alerts and the KEDA
-// autoscaler can observe backlog depth. These are refreshed on each scrape
-// (see podcast.RefreshJobGauges, called from handlers.Handler.Metrics) rather
-// than updated incrementally, since they reflect current DB state.
+// PendingJobsGauge, ProcessingJobsGauge, FailedJobsGauge, and DoneJobsGauge
+// track the background job queue (episode downloads + fingerprinting,
+// performed by separate worker pods) by job type, so dashboards/alerts and
+// the KEDA autoscaler can observe backlog depth and throughput. These are
+// refreshed on each scrape (see podcast.RefreshJobGauges, called from
+// handlers.Handler.Metrics) rather than updated incrementally, since they
+// reflect current DB state.
 var PendingJobsGauge = promauto.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Name: "local_podcasts_pending_jobs",
@@ -61,6 +62,14 @@ var FailedJobsGauge = promauto.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Name: "local_podcasts_failed_jobs",
 		Help: "Number of jobs that exhausted their retry attempts, by job type.",
+	},
+	[]string{"type"},
+)
+
+var DoneJobsGauge = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "local_podcasts_done_jobs",
+		Help: "Number of jobs that have completed successfully, by job type.",
 	},
 	[]string{"type"},
 )

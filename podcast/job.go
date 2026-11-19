@@ -297,6 +297,7 @@ func RefreshJobGauges(db *gorm.DB) {
 		metrics.PendingJobsGauge.WithLabelValues(string(jobType)).Set(countJobs(db, jobType, JobStatusPending))
 		metrics.ProcessingJobsGauge.WithLabelValues(string(jobType)).Set(countJobs(db, jobType, JobStatusProcessing))
 		metrics.FailedJobsGauge.WithLabelValues(string(jobType)).Set(countJobs(db, jobType, JobStatusFailed))
+		metrics.DoneJobsGauge.WithLabelValues(string(jobType)).Set(countJobs(db, jobType, JobStatusDone))
 	}
 }
 
