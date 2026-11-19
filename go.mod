@@ -3,10 +3,11 @@ module github.com/nathanamorin/local-podcasts
 go 1.26
 
 require (
+	github.com/ardanlabs/conf/v3 v3.12.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-co-op/gocron v1.11.0
 	github.com/gorilla/feeds v1.1.1
-	github.com/hajimehoshi/go-mp3 v0.3.2
+	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/labstack/echo/v4 v4.9.0
 	github.com/mmcdole/gofeed v1.1.3
 	github.com/stretchr/testify v1.7.0
@@ -17,7 +18,6 @@ require (
 require (
 	github.com/PuerkitoBio/goquery v1.5.1 // indirect
 	github.com/andybalholm/cascadia v1.1.0 // indirect
-	github.com/ardanlabs/conf/v3 v3.12.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
