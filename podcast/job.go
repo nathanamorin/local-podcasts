@@ -149,18 +149,34 @@ func EnqueueFingerprintJob(db *gorm.DB, podcastID, episodeID string) error {
 // enqueueJob only skips episodes with an in-flight pending/processing job,
 // so this safely retries ones stuck in a failed state too), and enqueues a
 // fingerprint job for each. Returns the number of jobs actually enqueued.
+//
+// Deliberately avoids a single "id NOT IN (SELECT episode_id FROM
+// episode_fingerprints)" query: SQLite planned that as a per-episode
+// correlated scan of the (large, chunk-per-5s-window) fingerprints table,
+// which - combined with the app's single shared DB connection
+// (SetMaxOpenConns(1)) - stalled all other DB access for the entire app for
+// several minutes. Two cheap indexed queries plus an in-memory set diff
+// avoids that.
 func EnqueueMissingFingerprintJobs(db *gorm.DB) (int, error) {
 	var episodes []Episode
-	err := db.Model(&Episode{}).
-		Where("audio_file != ?", "").
-		Where("id NOT IN (?)", db.Model(&EpisodeFingerprint{}).Select("episode_id")).
-		Find(&episodes).Error
-	if err != nil {
-		return 0, fmt.Errorf("list episodes missing fingerprints: %w", err)
+	if err := db.Model(&Episode{}).Where("audio_file != ?", "").Find(&episodes).Error; err != nil {
+		return 0, fmt.Errorf("list downloaded episodes: %w", err)
+	}
+
+	var fingerprintedIDs []string
+	if err := db.Model(&EpisodeFingerprint{}).Distinct("episode_id").Pluck("episode_id", &fingerprintedIDs).Error; err != nil {
+		return 0, fmt.Errorf("list episodes with fingerprints: %w", err)
+	}
+	fingerprinted := make(map[string]struct{}, len(fingerprintedIDs))
+	for _, id := range fingerprintedIDs {
+		fingerprinted[id] = struct{}{}
 	}
 
 	enqueued := 0
 	for _, ep := range episodes {
+		if _, ok := fingerprinted[ep.Id]; ok {
+			continue
+		}
 		created, err := enqueueJob(db, JobTypeFingerprint, ep.PodcastID, ep.Id)
 		if err != nil {
 			return enqueued, fmt.Errorf("enqueue fingerprint job for episode %s: %w", ep.Id, err)
