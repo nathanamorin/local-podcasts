@@ -24,5 +24,7 @@ Desktop
 
 An OpenAPI 3.0 spec is generated from Go handler annotations (via [swaggo/swag](https://github.com/swaggo/swag)) at build time and served at `/openapi.json`. A [Redoc](https://github.com/Redocly/redoc) UI for browsing it is available at `/doc` (alias: `/docs`), e.g. `http://localhost:8080/doc`. The Redoc UI bundle is vendored and embedded in the binary (`handlers/assets/redoc.standalone.js`), so the docs page has no external/CDN dependencies and works fully offline.
 
+Prometheus metrics (including Go/process runtime metrics and a custom `local_podcasts_episode_downloads_total` counter, labeled by podcast and success/failure) are exposed at `/metrics`. In the deployed cluster this is scraped by a `ServiceMonitor` (see `deployment/deployment.yaml`).
+
 Run `make generate-docs` to regenerate the spec locally before `go build`/`go test`, since the generated `apidocs/` package is not committed to version control.
 

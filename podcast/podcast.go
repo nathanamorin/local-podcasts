@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/feeds"
 	"github.com/hajimehoshi/go-mp3"
 	"github.com/mmcdole/gofeed"
+	"github.com/nathanamorin/local-podcasts/metrics"
 	"gorm.io/gorm"
 	"k8s.io/klog/v2"
 )
@@ -597,65 +598,85 @@ func getAudioLength(audioFile string) (int64, error) {
 	return samples / int64(d.SampleRate()), nil
 }
 
+// downloadEpisodeAudio fetches episode.AudioFile (expected to be a raw http(s)
+// URL at this point) into the podcast's data directory, validates it, and
+// updates episode.AudioFile to the local filename on success. It records a
+// local_podcasts_episode_downloads_total metric for every attempt, labeled by
+// podcast and success/failure.
+func (p *Podcast) downloadEpisodeAudio(config Config, episode *Episode) (err error) {
+	defer func() {
+		status := metrics.EpisodeDownloadSuccess
+		if err != nil {
+			status = metrics.EpisodeDownloadFailure
+		}
+		metrics.RecordEpisodeDownload(p.Name, status)
+	}()
+
+	if err := p.checkPodcastDirExists(config); err != nil {
+		return err
+	}
+
+	klog.Infof("downloading episode: %s -> %s", p.Name, episode.Name)
+
+	resp, err := httpGetWithUA(episode.AudioFile)
+	if err != nil {
+		return fmt.Errorf("GET %s: %w", episode.AudioFile, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected HTTP %d downloading episode %q from %s",
+			resp.StatusCode, episode.Name, episode.AudioFile)
+	}
+
+	fileExtension := filepath.Ext(episode.AudioFile)
+	if fileExtension == "" {
+		fileExtension = ".mp3"
+	}
+	fileExtension = strings.Split(fileExtension, "?")[0]
+	episodeFilename := episode.Id + fileExtension
+	episodeFilePath := filepath.Join(config.FileHome, p.Id, episodeFilename)
+
+	// Remove any existing (possibly partial) file before writing.
+	if _, err := os.Stat(episodeFilePath); !errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(episodeFilePath); err != nil {
+			return fmt.Errorf("remove existing file %s: %w", episodeFilePath, err)
+		}
+	}
+
+	file, err := os.Create(episodeFilePath)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", episodeFilePath, err)
+	}
+
+	n, err := file.ReadFrom(resp.Body)
+	file.Close()
+	if err != nil {
+		os.Remove(episodeFilePath)
+		return fmt.Errorf("write episode %q to %s (wrote %d bytes): %w",
+			episode.Name, episodeFilePath, n, err)
+	}
+	if n == 0 {
+		os.Remove(episodeFilePath)
+		return fmt.Errorf("episode %q downloaded 0 bytes from %s", episode.Name, episode.AudioFile)
+	}
+
+	if err := ValidateAudioFile(episodeFilePath); err != nil {
+		os.Remove(episodeFilePath)
+		return fmt.Errorf("episode %q failed audio validation (likely error page): %w", episode.Name, err)
+	}
+
+	episode.AudioFile = episodeFilename
+	klog.Infof("downloaded episode: %s -> %s (%d bytes)", p.Name, episode.Name, n)
+	return nil
+}
+
 func (p *Podcast) SyncPodcastEpisode(config Config, episode *Episode) error {
 
 	if strings.HasPrefix(episode.AudioFile, "http") {
-		if err := p.checkPodcastDirExists(config); err != nil {
+		if err := p.downloadEpisodeAudio(config, episode); err != nil {
 			return err
 		}
-
-		klog.Infof("downloading episode: %s -> %s", p.Name, episode.Name)
-
-		resp, err := httpGetWithUA(episode.AudioFile)
-		if err != nil {
-			return fmt.Errorf("GET %s: %w", episode.AudioFile, err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("unexpected HTTP %d downloading episode %q from %s",
-				resp.StatusCode, episode.Name, episode.AudioFile)
-		}
-
-		fileExtension := filepath.Ext(episode.AudioFile)
-		if fileExtension == "" {
-			fileExtension = ".mp3"
-		}
-		fileExtension = strings.Split(fileExtension, "?")[0]
-		episodeFilename := episode.Id + fileExtension
-		episodeFilePath := filepath.Join(config.FileHome, p.Id, episodeFilename)
-
-		// Remove any existing (possibly partial) file before writing.
-		if _, err := os.Stat(episodeFilePath); !errors.Is(err, os.ErrNotExist) {
-			if err := os.Remove(episodeFilePath); err != nil {
-				return fmt.Errorf("remove existing file %s: %w", episodeFilePath, err)
-			}
-		}
-
-		file, err := os.Create(episodeFilePath)
-		if err != nil {
-			return fmt.Errorf("create %s: %w", episodeFilePath, err)
-		}
-
-		n, err := file.ReadFrom(resp.Body)
-		file.Close()
-		if err != nil {
-			os.Remove(episodeFilePath)
-			return fmt.Errorf("write episode %q to %s (wrote %d bytes): %w",
-				episode.Name, episodeFilePath, n, err)
-		}
-		if n == 0 {
-			os.Remove(episodeFilePath)
-			return fmt.Errorf("episode %q downloaded 0 bytes from %s", episode.Name, episode.AudioFile)
-		}
-
-		if err := ValidateAudioFile(episodeFilePath); err != nil {
-			os.Remove(episodeFilePath)
-			return fmt.Errorf("episode %q failed audio validation (likely error page): %w", episode.Name, err)
-		}
-
-		episode.AudioFile = episodeFilename
-		klog.Infof("downloaded episode: %s -> %s (%d bytes)", p.Name, episode.Name, n)
 	}
 
 	if episode.Length <= 0 {

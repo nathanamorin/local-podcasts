@@ -9,6 +9,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi2conv"
 	"github.com/labstack/echo/v4"
 	"github.com/nathanamorin/local-podcasts/apidocs"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/swaggo/swag"
 	"k8s.io/klog/v2"
 )
@@ -91,4 +92,16 @@ func (h *Handler) APIDocs(c echo.Context) error {
 // @Router       /doc/redoc.standalone.js [get]
 func (h *Handler) RedocBundle(c echo.Context) error {
 	return c.Blob(http.StatusOK, "text/javascript; charset=utf-8", redocBundleJS)
+}
+
+// Metrics godoc
+// @Summary      Prometheus metrics
+// @Description  Exposes application metrics (including local_podcasts_episode_downloads_total) in Prometheus text exposition format.
+// @Tags         docs
+// @Produce      plain
+// @Success      200
+// @Router       /metrics [get]
+func (h *Handler) Metrics(c echo.Context) error {
+	promhttp.Handler().ServeHTTP(c.Response(), c.Request())
+	return nil
 }

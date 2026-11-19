@@ -60,6 +60,25 @@ spec:
       targetPort: 8080
       name: local-podcasts
 ---
+# Scraped by the cluster's Grafana Alloy agent (prometheus.operator.servicemonitors),
+# which forwards to Mimir. Exposes local_podcasts_episode_downloads_total and
+# Go/process runtime metrics at /metrics.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: local-podcasts
+  namespace: local-podcasts
+  labels:
+    app: local-podcasts
+spec:
+  selector:
+    matchLabels:
+      app: local-podcasts
+  endpoints:
+    - port: local-podcasts
+      path: /metrics
+      interval: 60s
+---
 # Example ingress below, but will likely be different depending on your environment
 apiVersion: networking.k8s.io/v1
 kind: Ingress
