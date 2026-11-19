@@ -39,7 +39,7 @@ type workerConfig struct {
 	PublicAPIURL   string        `conf:"default:http://local-podcasts.local-podcasts.svc.cluster.local:8080,help:base URL of the main app's public API (used to stream audio for fingerprinting)"`
 	PollInterval   time.Duration `conf:"default:3s,help:how often to poll for a new job when idle"`
 	Concurrency    int           `conf:"default:2,help:number of jobs this pod processes concurrently"`
-	JobTypes       string        `conf:"default:download,fingerprint,help:comma-separated job types this worker pod accepts"`
+	JobTypes       string        `conf:"default:download;fingerprint,help:semicolon-separated job types this worker pod accepts (split on comma or semicolon)"`
 }
 
 // jobResponse mirrors handlers.jobResponse — the two are not shared via
@@ -68,7 +68,7 @@ func main() {
 		hostname = fmt.Sprintf("worker-%d", os.Getpid())
 	}
 
-	types := strings.Split(cfg.JobTypes, ",")
+	types := strings.FieldsFunc(cfg.JobTypes, func(r rune) bool { return r == ',' || r == ';' })
 	klog.Infof("starting local-podcasts worker build[%s] internal-api[%s] public-api[%s] id[%s] types[%v] concurrency[%d]",
 		build, cfg.InternalAPIURL, cfg.PublicAPIURL, hostname, types, cfg.Concurrency)
 
