@@ -24,6 +24,22 @@ import (
 
 const podcastImageFilenameNoExt = "image"
 
+// browserUserAgent mimics a common desktop browser. Some CDNs (e.g. Acast's
+// sphinx.acast.com) return HTTP 403 for Go's default "Go-http-client" User-Agent,
+// so feed, image, and episode downloads must send a browser-like UA instead.
+const browserUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+// httpGetWithUA performs an HTTP GET with a browser-like User-Agent set, since
+// some podcast CDNs reject requests carrying Go's default User-Agent header.
+func httpGetWithUA(url string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", browserUserAgent)
+	return http.DefaultClient.Do(req)
+}
+
 // ValidateAudioFile reads the first 512 bytes of a file and returns an error
 // if the detected content type is text-based (i.e. an HTML/JSON error page
 // was saved instead of audio data).
@@ -287,7 +303,7 @@ func NewPodcastObj() Podcast {
 }
 
 func (p *Podcast) readCurrentFeed() (string, error) {
-	resp, err := http.Get(p.RSSUrl)
+	resp, err := httpGetWithUA(p.RSSUrl)
 	if err != nil {
 		return "", fmt.Errorf("error making get request %s: %s", p.RSSUrl, err)
 	}
@@ -590,7 +606,7 @@ func (p *Podcast) SyncPodcastEpisode(config Config, episode *Episode) error {
 
 		klog.Infof("downloading episode: %s -> %s", p.Name, episode.Name)
 
-		resp, err := http.Get(episode.AudioFile)
+		resp, err := httpGetWithUA(episode.AudioFile)
 		if err != nil {
 			return fmt.Errorf("GET %s: %w", episode.AudioFile, err)
 		}
@@ -672,7 +688,7 @@ func (p *Podcast) SavePodcastMetadata(config Config, db *gorm.DB) error {
 
 	if !p.DisableAutoUpdate {
 		if strings.HasPrefix(p.ImageFile, "http") {
-			resp, err := http.Get(p.ImageFile)
+			resp, err := httpGetWithUA(p.ImageFile)
 			if err != nil {
 				return err
 			}
