@@ -69,6 +69,17 @@ export async function deleteClientInfo(key) {
   })
 }
 
+// Whether ad segments detected via audio fingerprinting should be
+// automatically skipped during playback. Defaults to enabled; persisted
+// per-device in localStorage (not synced across devices).
+export function getAdSkipEnabled() {
+  return localStorage.getItem('adSkipEnabled') !== 'false'
+}
+
+export function setAdSkipEnabled(enabled) {
+  localStorage.setItem('adSkipEnabled', enabled ? 'true' : 'false')
+}
+
 export function group(list, n) {
   const increment = Math.max(n, 1);
   const newList = [];

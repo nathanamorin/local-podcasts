@@ -1,21 +1,80 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Box, Button, Text } from 'grommet'
+import { Box, Button, CheckBox, Text } from 'grommet'
 import { Play, Pause, Next } from 'grommet-icons'
 import { Cast } from 'react-feather'
 import AudioPlayer from 'react-h5-audio-player'
 import 'react-h5-audio-player/lib/styles.css'
 import { usePlayer } from '../PlayerContext'
 import { useChromecast } from '../pages/podcast/useChromecast'
-import { getClientInfo, setClientInfo } from '../pages/utils'
+import { getClientInfo, setClientInfo, getAdSkipEnabled, setAdSkipEnabled } from '../pages/utils'
 import { theme, cardBackground } from '../pages/theme'
 
 const PLAYER_HEIGHT = '130px'
+
+// Merges overlapping/adjacent [start, end] ranges so playback only ever
+// needs to check/skip a single range at a time.
+function mergeRanges(ranges) {
+  const sorted = [...ranges].sort((a, b) => a.start - b.start)
+  const merged = []
+  for (const r of sorted) {
+    const last = merged[merged.length - 1]
+    if (last && r.start <= last.end) {
+      last.end = Math.max(last.end, r.end)
+    } else {
+      merged.push({ ...r })
+    }
+  }
+  return merged
+}
 
 export function PlayerBar() {
   const { currentPodcast, currentEpisode, queue, setShowQueue, playNext } = usePlayer()
   const { isAvailable, isConnected, isPaused, requestSession, loadMedia, playOrPause } = useChromecast()
   const playerRef = useRef(null)
+  const [adSkipEnabled, setAdSkipEnabledState] = useState(getAdSkipEnabled())
+  const [adRanges, setAdRanges] = useState([])
+
+  // Load detected ad segments for the current episode so they can be
+  // auto-skipped during playback. Ad detection is best-effort (audio
+  // fingerprint matching across episodes), so this silently yields no
+  // ranges until enough episodes have been fingerprinted.
+  useEffect(() => {
+    if (!currentEpisode) {
+      setAdRanges([])
+      return
+    }
+    let cancelled = false
+    fetch(`/ads/candidates?episode_id=${encodeURIComponent(currentEpisode.id)}`)
+      .then(r => r.ok ? r.json() : { candidates: [] })
+      .then(data => {
+        if (cancelled) return
+        const ranges = (data.candidates || []).map(c => (
+          c.episode_a_id === currentEpisode.id
+            ? { start: c.start_a_sec, end: c.end_a_sec }
+            : { start: c.start_b_sec, end: c.end_b_sec }
+        ))
+        setAdRanges(mergeRanges(ranges))
+      })
+      .catch(() => { if (!cancelled) setAdRanges([]) })
+    return () => { cancelled = true }
+  }, [currentEpisode?.id])
+
+  function toggleAdSkip(enabled) {
+    setAdSkipEnabledState(enabled)
+    setAdSkipEnabled(enabled)
+  }
+
+  // When the player reports the current time, skip past any ad range the
+  // playhead has entered.
+  function handleTimeUpdate(audio) {
+    if (!adSkipEnabled || adRanges.length === 0 || !audio) return
+    const t = audio.currentTime
+    const range = adRanges.find(r => t >= r.start && t < r.end)
+    if (range) {
+      audio.currentTime = range.end
+    }
+  }
 
   // When episode changes, load on Cast receiver if connected
   useEffect(() => {
@@ -93,6 +152,7 @@ export function PlayerBar() {
         src={audioFile}
         onListen={async e => {
           if (!e.target.src) return
+          handleTimeUpdate(e.target)
           await setClientInfo(`${currentPodcast.id}-${currentEpisode.id}`, e.target.currentTime)
         }}
         listenInterval={1000}
@@ -165,6 +225,13 @@ export function PlayerBar() {
         </Box>
 
         <Box direction="row" align="center" gap="xsmall" flex={{ shrink: 0 }}>
+          <CheckBox
+            toggle
+            checked={adSkipEnabled}
+            onChange={e => toggleAdSkip(e.target.checked)}
+            label={<Text size="xsmall" color="text-weak">Skip Ads</Text>}
+            title={adSkipEnabled ? 'Ad skipping enabled - click to disable' : 'Ad skipping disabled - click to enable'}
+          />
           {isAvailable && (
             <Button
               plain
