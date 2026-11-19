@@ -52,6 +52,12 @@ kind: Service
 metadata:
   name: local-podcasts
   namespace: local-podcasts
+  # The ServiceMonitor's spec.selector.matchLabels matches against this
+  # Service's metadata.labels (not spec.selector) - without this label the
+  # ServiceMonitor is discovered but the scrape target is relabel-dropped,
+  # so the metric never reaches Prometheus/Mimir.
+  labels:
+    app: local-podcasts
 spec:
   selector:
     app: local-podcasts
