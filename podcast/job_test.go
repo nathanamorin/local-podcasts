@@ -20,6 +20,48 @@ func TestEnqueueDownloadJob_IsIdempotentWhilePending(t *testing.T) {
 	assert.Equal(t, int64(1), count)
 }
 
+func TestEnqueueMissingFingerprintJobs(t *testing.T) {
+	db := openTestDB(t)
+	p := NewPodcastObj()
+	p.Id = "pod1"
+	p.Name = "Pod One"
+	p.Episodes = []*Episode{
+		// ep1: downloaded, already fingerprinted - should be skipped.
+		{PodcastID: "pod1", Id: "ep1", AudioFile: "ep1.mp3"},
+		// ep2: downloaded, no fingerprint data yet - should be enqueued.
+		{PodcastID: "pod1", Id: "ep2", AudioFile: "ep2.mp3"},
+		// ep3: downloaded, previously had a fingerprint job fail - should
+		// still be enqueued (retried), since it has no fingerprint rows.
+		{PodcastID: "pod1", Id: "ep3", AudioFile: "ep3.mp3"},
+		// ep4: not downloaded yet (no audio file) - should be skipped.
+		{PodcastID: "pod1", Id: "ep4", AudioFile: ""},
+	}
+	require.NoError(t, p.SavePodcastMetadata(Config{FileHome: t.TempDir()}, db))
+	for _, ep := range p.Episodes {
+		require.NoError(t, db.Save(ep).Error)
+	}
+
+	require.NoError(t, db.Create(&EpisodeFingerprint{PodcastID: "pod1", EpisodeID: "ep1", StartSec: 0, Hash: 1}).Error)
+	require.NoError(t, db.Create(&Job{ID: "failed-job", Type: JobTypeFingerprint, PodcastID: "pod1", EpisodeID: "ep3", Status: JobStatusFailed}).Error)
+
+	enqueued, err := EnqueueMissingFingerprintJobs(db)
+	require.NoError(t, err)
+	assert.Equal(t, 2, enqueued)
+
+	var pending []Job
+	require.NoError(t, db.Where("type = ? AND status = ?", JobTypeFingerprint, JobStatusPending).Find(&pending).Error)
+	gotEpisodes := make([]string, 0, len(pending))
+	for _, j := range pending {
+		gotEpisodes = append(gotEpisodes, j.EpisodeID)
+	}
+	assert.ElementsMatch(t, []string{"ep2", "ep3"}, gotEpisodes)
+
+	// Calling again should be a no-op now that both are pending.
+	enqueued, err = EnqueueMissingFingerprintJobs(db)
+	require.NoError(t, err)
+	assert.Equal(t, 0, enqueued)
+}
+
 func TestClaimJob_ReturnsOldestPendingAndMarksProcessing(t *testing.T) {
 	db := openTestDB(t)
 

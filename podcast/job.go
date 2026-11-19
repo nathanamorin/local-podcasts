@@ -102,17 +102,18 @@ type EpisodeFingerprint struct {
 // enqueueJob creates a pending job for the given episode, unless one of the
 // same type already exists for it in a non-terminal state (pending or
 // processing) — keeps re-syncing a feed or re-running backfill idempotent.
-func enqueueJob(db *gorm.DB, jobType JobType, podcastID, episodeID string) error {
+// Returns whether a new job was actually created.
+func enqueueJob(db *gorm.DB, jobType JobType, podcastID, episodeID string) (bool, error) {
 	var existing int64
 	err := db.Model(&Job{}).
 		Where("type = ? AND podcast_id = ? AND episode_id = ? AND status IN ?",
 			jobType, podcastID, episodeID, []JobStatus{JobStatusPending, JobStatusProcessing}).
 		Count(&existing).Error
 	if err != nil {
-		return fmt.Errorf("check existing jobs: %w", err)
+		return false, fmt.Errorf("check existing jobs: %w", err)
 	}
 	if existing > 0 {
-		return nil
+		return false, nil
 	}
 
 	job := Job{
@@ -122,19 +123,53 @@ func enqueueJob(db *gorm.DB, jobType JobType, podcastID, episodeID string) error
 		EpisodeID: episodeID,
 		Status:    JobStatusPending,
 	}
-	return db.Create(&job).Error
+	if err := db.Create(&job).Error; err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // EnqueueDownloadJob enqueues a job for a worker to download an episode's
 // audio file.
 func EnqueueDownloadJob(db *gorm.DB, podcastID, episodeID string) error {
-	return enqueueJob(db, JobTypeDownload, podcastID, episodeID)
+	_, err := enqueueJob(db, JobTypeDownload, podcastID, episodeID)
+	return err
 }
 
 // EnqueueFingerprintJob enqueues a job for a worker to compute audio
 // fingerprints for an already-downloaded episode.
 func EnqueueFingerprintJob(db *gorm.DB, podcastID, episodeID string) error {
-	return enqueueJob(db, JobTypeFingerprint, podcastID, episodeID)
+	_, err := enqueueJob(db, JobTypeFingerprint, podcastID, episodeID)
+	return err
+}
+
+// EnqueueMissingFingerprintJobs scans for episodes that have a downloaded
+// audio file but no fingerprint data (e.g. episodes downloaded before
+// fingerprinting existed, or whose fingerprint job previously failed - note
+// enqueueJob only skips episodes with an in-flight pending/processing job,
+// so this safely retries ones stuck in a failed state too), and enqueues a
+// fingerprint job for each. Returns the number of jobs actually enqueued.
+func EnqueueMissingFingerprintJobs(db *gorm.DB) (int, error) {
+	var episodes []Episode
+	err := db.Model(&Episode{}).
+		Where("audio_file != ?", "").
+		Where("id NOT IN (?)", db.Model(&EpisodeFingerprint{}).Select("episode_id")).
+		Find(&episodes).Error
+	if err != nil {
+		return 0, fmt.Errorf("list episodes missing fingerprints: %w", err)
+	}
+
+	enqueued := 0
+	for _, ep := range episodes {
+		created, err := enqueueJob(db, JobTypeFingerprint, ep.PodcastID, ep.Id)
+		if err != nil {
+			return enqueued, fmt.Errorf("enqueue fingerprint job for episode %s: %w", ep.Id, err)
+		}
+		if created {
+			enqueued++
+		}
+	}
+	return enqueued, nil
 }
 
 // GetJob looks up a job by ID.

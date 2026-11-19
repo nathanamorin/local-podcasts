@@ -56,6 +56,7 @@ func (h *Handler) Register(e *echo.Echo) {
 	e.GET("/rss/all", h.RSSAll)
 
 	e.GET("/ads/candidates", h.ListAdCandidates)
+	e.POST("/ads/rescan-fingerprints", h.RescanFingerprints)
 
 	e.GET("/openapi.json", h.OpenAPISpec)
 	e.GET("/doc", h.APIDocs)
