@@ -23,6 +23,11 @@ type podcastList struct {
 	Podcasts []podcast.Podcast `json:"podcasts"`
 }
 
+// addPodcastRequest documents the expected AddPodcast request body.
+type addPodcastRequest struct {
+	RSSUrl string `json:"rss_url"`
+}
+
 // Handler holds shared dependencies for all route handlers.
 type Handler struct {
 	config podcast.Config
@@ -45,6 +50,9 @@ func (h *Handler) Register(e *echo.Echo) {
 	e.GET("/podcasts/:podcast_id/episodes/:episode_id/stream", h.StreamEpisode)
 
 	e.GET("/rss/all", h.RSSAll)
+
+	e.GET("/openapi.json", h.OpenAPISpec)
+	e.GET("/doc", h.APIDocs)
 
 	// These status endpoints are not intended to provide secure user data management.
 	// The only data stored are podcast status, played, etc. In the intended local
@@ -70,11 +78,26 @@ func (h *Handler) EnqueueAll() {
 	}
 }
 
+// Refresh godoc
+// @Summary      Refresh all podcasts
+// @Description  Enqueues every known podcast for a background RSS/episode sync.
+// @Tags         podcasts
+// @Produce      json
+// @Success      200  {object}  map[string]string
+// @Router       /refresh [get]
 func (h *Handler) Refresh(c echo.Context) error {
 	h.EnqueueAll()
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// ListPodcasts godoc
+// @Summary      List subscribed podcasts
+// @Description  Returns all subscribed podcasts with episode lists omitted.
+// @Tags         podcasts
+// @Produce      json
+// @Success      200  {object}  podcastList
+// @Failure      500  {object}  map[string]string
+// @Router       /podcasts [get]
 func (h *Handler) ListPodcasts(c echo.Context) error {
 	podcasts, err := h.pw.ListPodcasts()
 	if err != nil {
@@ -89,6 +112,16 @@ func (h *Handler) ListPodcasts(c echo.Context) error {
 	return c.JSON(http.StatusOK, podcastList{Podcasts: podcasts})
 }
 
+// AddPodcast godoc
+// @Summary      Subscribe to a podcast
+// @Description  Adds a podcast subscription from an RSS feed URL and queues it for sync.
+// @Tags         podcasts
+// @Accept       json
+// @Produce      json
+// @Param        request  body      addPodcastRequest  true  "RSS feed URL"
+// @Success      200      {object}  podcast.Podcast
+// @Failure      400      {object}  map[string]string
+// @Router       /podcasts [post]
 func (h *Handler) AddPodcast(c echo.Context) error {
 	jsonData := make(map[string]interface{})
 	if err := json.NewDecoder(c.Request().Body).Decode(&jsonData); err != nil {
@@ -113,6 +146,15 @@ func (h *Handler) AddPodcast(c echo.Context) error {
 	return c.JSON(http.StatusOK, podcastData)
 }
 
+// GetPodcast godoc
+// @Summary      Get a podcast
+// @Description  Returns a single subscribed podcast, including its episode list.
+// @Tags         podcasts
+// @Produce      json
+// @Param        podcast_id  path      string  true  "Podcast ID"
+// @Success      200         {object}  podcast.Podcast
+// @Failure      500         {object}  map[string]string
+// @Router       /podcasts/{podcast_id} [get]
 func (h *Handler) GetPodcast(c echo.Context) error {
 	podcastData, err := h.pw.GetPodcast(c.Param("podcast_id"))
 	if err != nil {
@@ -123,6 +165,15 @@ func (h *Handler) GetPodcast(c echo.Context) error {
 	return c.JSON(http.StatusOK, podcastData)
 }
 
+// GetPodcastImage godoc
+// @Summary      Get a podcast's cover image
+// @Description  Returns the cached cover image file for a podcast.
+// @Tags         podcasts
+// @Produce      image/*
+// @Param        podcast_id  path  string  true  "Podcast ID"
+// @Success      200
+// @Failure      500  {object}  map[string]string
+// @Router       /podcasts/{podcast_id}/image [get]
 func (h *Handler) GetPodcastImage(c echo.Context) error {
 	podcastData, err := h.pw.GetPodcast(c.Param("podcast_id"))
 	if err != nil {
@@ -138,6 +189,17 @@ func (h *Handler) GetPodcastImage(c echo.Context) error {
 	return nil
 }
 
+// StreamEpisode godoc
+// @Summary      Stream an episode's audio
+// @Description  Streams the downloaded audio file for a podcast episode, requeuing a redownload if the file is missing or invalid.
+// @Tags         podcasts
+// @Produce      audio/mpeg
+// @Param        podcast_id  path  string  true  "Podcast ID"
+// @Param        episode_id  path  string  true  "Episode ID"
+// @Success      200
+// @Failure      500  {object}  map[string]string
+// @Failure      503  {object}  map[string]string
+// @Router       /podcasts/{podcast_id}/episodes/{episode_id}/stream [get]
 func (h *Handler) StreamEpisode(c echo.Context) error {
 	podcastID := c.Param("podcast_id")
 	episodeID := c.Param("episode_id")
@@ -176,6 +238,14 @@ func (h *Handler) StreamEpisode(c echo.Context) error {
 	return nil
 }
 
+// RSSAll godoc
+// @Summary      Combined RSS feed
+// @Description  Returns a single RSS feed aggregating all subscribed podcasts' episodes.
+// @Tags         rss
+// @Produce      xml
+// @Success      200  {string}  string
+// @Failure      500  {object}  map[string]string
+// @Router       /rss/all [get]
 func (h *Handler) RSSAll(c echo.Context) error {
 	podcasts, err := h.pw.ListPodcasts()
 	if err != nil {
@@ -213,6 +283,16 @@ func (h *Handler) clientInfo(c echo.Context) (key string, filePath string) {
 	return
 }
 
+// GetClientStatus godoc
+// @Summary      Get client status blob
+// @Description  Returns a client-stored status blob (e.g. playback progress) identified by a client-generated key.
+// @Tags         client-status
+// @Produce      plain
+// @Param        key-id  path  string  true  "Client status key"
+// @Success      200
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /client-status/{key-id} [get]
 func (h *Handler) GetClientStatus(c echo.Context) error {
 	key, filePath := h.clientInfo(c)
 
@@ -242,6 +322,16 @@ func (h *Handler) GetClientStatus(c echo.Context) error {
 	return err
 }
 
+// PutClientStatus godoc
+// @Summary      Store client status blob
+// @Description  Stores/overwrites a client-stored status blob identified by a client-generated key.
+// @Tags         client-status
+// @Accept       plain
+// @Produce      json
+// @Param        key-id   path  string  true  "Client status key"
+// @Success      200      {object}  map[string]string
+// @Failure      500      {object}  map[string]string
+// @Router       /client-status/{key-id} [put]
 func (h *Handler) PutClientStatus(c echo.Context) error {
 	key, filePath := h.clientInfo(c)
 
@@ -259,6 +349,15 @@ func (h *Handler) PutClientStatus(c echo.Context) error {
 	return c.JSONBlob(http.StatusOK, []byte(`{"status": "success"}`))
 }
 
+// DeleteClientStatus godoc
+// @Summary      Delete client status blob
+// @Description  Deletes a client-stored status blob identified by a client-generated key.
+// @Tags         client-status
+// @Produce      json
+// @Param        key-id  path  string  true  "Client status key"
+// @Success      200     {object}  map[string]string
+// @Failure      500     {object}  map[string]string
+// @Router       /client-status/{key-id} [delete]
 func (h *Handler) DeleteClientStatus(c echo.Context) error {
 	key, filePath := h.clientInfo(c)
 

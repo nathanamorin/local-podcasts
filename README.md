@@ -19,3 +19,10 @@ Mobile
 ![Mobile Screenshot](./docs/img/mobile.png)
 Desktop
 ![Desktop Screenshot](./docs/img/desktop.png)
+
+# API Documentation
+
+An OpenAPI 3.0 spec is generated from Go handler annotations (via [swaggo/swag](https://github.com/swaggo/swag)) at build time and served at `/openapi.json`. A [Redoc](https://github.com/Redocly/redoc) UI for browsing it is available at `/doc` (e.g. `http://localhost:8080/doc`).
+
+Run `make generate-docs` to regenerate the spec locally before `go build`/`go test`, since the generated `apidocs/` package is not committed to version control.
+

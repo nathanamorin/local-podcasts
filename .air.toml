@@ -2,10 +2,10 @@ root = "."
 tmp_dir = ".air"
 
 [build]
-  cmd = "go build -o .air/main ."
+  cmd = "go tool swag init -g main.go --output apidocs --parseInternal && go build -o .air/main ."
   bin = ".air/main"
   delay = 500
-  exclude_dir = [".air", ".data", "app", "static", "deployment", "docs"]
+  exclude_dir = [".air", ".data", "app", "static", "deployment", "docs", "apidocs"]
   exclude_regex = ["_test\\.go$"]
   include_ext = ["go"]
   kill_delay = "2s"

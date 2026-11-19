@@ -25,6 +25,12 @@ type appConfig struct {
 	Addr     string `conf:"default::8080,help:listen address for the HTTP server"`
 }
 
+// @title           local-podcasts API
+// @version         1.0
+// @description     API for managing self-hosted podcast subscriptions, episode downloads, and streaming.
+// @license.name    MIT
+
+// @BasePath  /
 func main() {
 
 	cfg := appConfig{}

@@ -1,7 +1,12 @@
 mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 mkfile_dir := $(dir $(mkfile_path))
 
-.PHONY: build up up-detach down logs dev frontend seed run sh
+.PHONY: build up up-detach down logs dev frontend seed run sh generate-docs
+
+# Generate the OpenAPI/Swagger spec from Go handler annotations (swaggo/swag).
+# Required before `go build`/`go test` since apidocs/ is generated, not committed.
+generate-docs:
+	go tool swag init -g main.go --output apidocs --parseInternal
 
 # Start all services with hot reload via Docker Compose (air for backend, npm start for frontend)
 up:

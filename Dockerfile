@@ -12,6 +12,11 @@ RUN go mod download
 # https://docs.docker.com/engine/reference/builder/#copy
 COPY . .
 
+# Generate the OpenAPI/Swagger spec from Go handler annotations (swaggo/swag).
+# This is regenerated on every build so it always matches the current source;
+# the generated apidocs/ package is not committed to version control.
+RUN go tool swag init -g main.go --output apidocs --parseInternal
+
 # Build
 RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -a -installsuffix cgo -o local-podcasts .
 
