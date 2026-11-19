@@ -3,12 +3,14 @@ package podcast
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -446,8 +448,13 @@ func (p *Podcast) mergeNewInfo(newPodcast *Podcast) {
 }
 
 func AddPodcast(config Config, db *gorm.DB, RSSUrl string) (*Podcast, error) {
+	feedURL, err := ResolveFeedURL(RSSUrl)
+	if err != nil {
+		return nil, err
+	}
+
 	podcast := NewPodcastObj()
-	podcast.RSSUrl = RSSUrl
+	podcast.RSSUrl = feedURL
 	feedData, err := podcast.readCurrentFeed()
 	if err != nil {
 		return nil, err
@@ -463,6 +470,61 @@ func AddPodcast(config Config, db *gorm.DB, RSSUrl string) (*Podcast, error) {
 	}
 
 	return newPodcastInfo, nil
+}
+
+// applePodcastsURLRegex matches podcasts.apple.com URLs and captures the
+// numeric podcast ("collection") ID, e.g.
+// https://podcasts.apple.com/us/podcast/the-daily/id1200361736 -> 1200361736.
+var applePodcastsURLRegex = regexp.MustCompile(`^https?://(?:[a-z0-9-]+\.)?podcasts\.apple\.com/.*[/?]id(\d+)`)
+
+// itunesLookupResponse models the subset of the iTunes Lookup API response
+// (https://itunes.apple.com/lookup?id=<id>) that's needed to resolve a
+// podcast's RSS feed URL.
+type itunesLookupResponse struct {
+	ResultCount int `json:"resultCount"`
+	Results     []struct {
+		FeedURL string `json:"feedUrl"`
+	} `json:"results"`
+}
+
+// itunesLookupBaseURL is the iTunes Lookup API endpoint, overridable in
+// tests to point at a mock server.
+var itunesLookupBaseURL = "https://itunes.apple.com/lookup"
+
+// ResolveFeedURL accepts either a direct RSS feed URL or an Apple Podcasts
+// show URL (e.g. https://podcasts.apple.com/us/podcast/the-daily/id1200361736)
+// and returns the underlying RSS feed URL. Apple Podcasts URLs are resolved
+// via Apple's free, public iTunes Lookup API. Any other URL is returned
+// unchanged.
+func ResolveFeedURL(url string) (string, error) {
+	matches := applePodcastsURLRegex.FindStringSubmatch(url)
+	if matches == nil {
+		return url, nil
+	}
+	podcastID := matches[1]
+
+	lookupURL := fmt.Sprintf("%s?id=%s&entity=podcast", itunesLookupBaseURL, podcastID)
+	resp, err := httpGetWithUA(lookupURL)
+	if err != nil {
+		return "", fmt.Errorf("resolving Apple Podcasts URL %q: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("resolving Apple Podcasts URL %q: unexpected HTTP %d from iTunes lookup API", url, resp.StatusCode)
+	}
+
+	var lookup itunesLookupResponse
+	if err := json.NewDecoder(resp.Body).Decode(&lookup); err != nil {
+		return "", fmt.Errorf("resolving Apple Podcasts URL %q: decoding iTunes lookup response: %w", url, err)
+	}
+
+	if lookup.ResultCount == 0 || len(lookup.Results) == 0 || lookup.Results[0].FeedURL == "" {
+		return "", fmt.Errorf("resolving Apple Podcasts URL %q: no RSS feed found for podcast id %s", url, podcastID)
+	}
+
+	klog.Infof("resolved Apple Podcasts URL %q to RSS feed %q", url, lookup.Results[0].FeedURL)
+	return lookup.Results[0].FeedURL, nil
 }
 
 func (p *Podcast) checkPodcastDirExists(config Config) error {

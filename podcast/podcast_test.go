@@ -2,6 +2,8 @@ package podcast
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -358,6 +360,48 @@ func TestRenderPodcasts_Empty(t *testing.T) {
 	rss, err := RenderPodcasts([]Podcast{}, "http://localhost:8080")
 	require.NoError(t, err)
 	assert.Contains(t, rss, "<rss")
+}
+
+// ---------------------------------------------------------------------------
+// ResolveFeedURL
+// ---------------------------------------------------------------------------
+
+func TestResolveFeedURL_PassesThroughNonAppleURL(t *testing.T) {
+	url, err := ResolveFeedURL("https://feeds.simplecast.com/Sl5CSM3S")
+	require.NoError(t, err)
+	assert.Equal(t, "https://feeds.simplecast.com/Sl5CSM3S", url)
+}
+
+func TestResolveFeedURL_ResolvesAppleURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "1200361736", r.URL.Query().Get("id"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"resultCount":1,"results":[{"feedUrl":"https://feeds.simplecast.com/Sl5CSM3S"}]}`))
+	}))
+	defer server.Close()
+
+	originalBaseURL := itunesLookupBaseURL
+	itunesLookupBaseURL = server.URL
+	defer func() { itunesLookupBaseURL = originalBaseURL }()
+
+	url, err := ResolveFeedURL("https://podcasts.apple.com/us/podcast/the-daily/id1200361736")
+	require.NoError(t, err)
+	assert.Equal(t, "https://feeds.simplecast.com/Sl5CSM3S", url)
+}
+
+func TestResolveFeedURL_NoResultsReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"resultCount":0,"results":[]}`))
+	}))
+	defer server.Close()
+
+	originalBaseURL := itunesLookupBaseURL
+	itunesLookupBaseURL = server.URL
+	defer func() { itunesLookupBaseURL = originalBaseURL }()
+
+	_, err := ResolveFeedURL("https://podcasts.apple.com/us/podcast/does-not-exist/id999999")
+	assert.Error(t, err)
 }
 
 // ---------------------------------------------------------------------------

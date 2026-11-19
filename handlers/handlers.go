@@ -25,6 +25,10 @@ type podcastList struct {
 
 // addPodcastRequest documents the expected AddPodcast request body.
 type addPodcastRequest struct {
+	// RSSUrl may be a direct RSS feed URL, or an Apple Podcasts show URL
+	// (e.g. https://podcasts.apple.com/us/podcast/the-daily/id1200361736),
+	// which is automatically resolved to its RSS feed via Apple's iTunes
+	// Lookup API.
 	RSSUrl string `json:"rss_url"`
 }
 
@@ -122,7 +126,7 @@ func (h *Handler) ListPodcasts(c echo.Context) error {
 // @Tags         podcasts
 // @Accept       json
 // @Produce      json
-// @Param        request  body      addPodcastRequest  true  "RSS feed URL"
+// @Param        request  body      addPodcastRequest  true  "RSS feed URL, or an Apple Podcasts show URL to auto-resolve"
 // @Success      200      {object}  podcast.Podcast
 // @Failure      400      {object}  map[string]string
 // @Router       /podcasts [post]

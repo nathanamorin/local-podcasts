@@ -28,3 +28,5 @@ Prometheus metrics (including Go/process runtime metrics and a custom `local_pod
 
 Run `make generate-docs` to regenerate the spec locally before `go build`/`go test`, since the generated `apidocs/` package is not committed to version control.
 
+`POST /podcasts` accepts either a direct RSS feed URL, or an Apple Podcasts show URL (e.g. `https://podcasts.apple.com/us/podcast/the-daily/id1200361736`), which is automatically resolved to its RSS feed via Apple's free iTunes Lookup API.
+
