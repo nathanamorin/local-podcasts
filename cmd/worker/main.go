@@ -29,6 +29,7 @@ import (
 	"github.com/ardanlabs/conf/v3"
 	"github.com/nathanamorin/local-podcasts/fingerprint"
 	"github.com/nathanamorin/local-podcasts/podcast"
+	_ "go.uber.org/automaxprocs" // sets GOMAXPROCS from the container's cgroup CPU limit so CPU-bound parallelism (fingerprinting) doesn't oversubscribe and get throttled
 	"k8s.io/klog/v2"
 )
 

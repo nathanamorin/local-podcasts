@@ -87,3 +87,11 @@ func TestHammingDistance_DifferentContentDiffers(t *testing.T) {
 		t.Errorf("expected clearly different hashes (hamming >= 16) for different tones, got %d", d)
 	}
 }
+
+func BenchmarkComputeFromSamples(b *testing.B) {
+	samples := synthTone(targetSampleRate, 440, 600, 10000) // 10 minutes
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		computeFromSamples(samples, targetSampleRate)
+	}
+}

@@ -29,6 +29,8 @@ import (
 	"math/bits"
 	"math/cmplx"
 	"os"
+	"runtime"
+	"sync"
 
 	"github.com/hajimehoshi/go-mp3"
 )
@@ -155,26 +157,81 @@ func computeFromSamples(samples []float32, sampleRate int) []Chunk {
 
 	hamming := hammingWindow(frameSize)
 
-	var chunks []Chunk
+	var starts []int
 	for start := 0; start+windowSamples <= len(samples); start += hopSamples {
-		windowSlice := samples[start : start+windowSamples]
+		starts = append(starts, start)
+	}
+	if len(starts) == 0 {
+		return nil
+	}
 
-		if rms(windowSlice) < silenceRMSThreshold {
-			continue
+	// Each window is independent (only reads from samples/hamming, which are
+	// never mutated after this point), so windows are hashed concurrently
+	// across a bounded worker pool. Results are written into a slice indexed
+	// by window position and filtered back into order afterward, so output
+	// is identical to the sequential version regardless of goroutine
+	// completion order.
+	results := computeWindowsParallel(samples, starts, windowSamples, framesPerWindow, sampleRate, hamming)
+
+	var chunks []Chunk
+	for _, c := range results {
+		if c != nil {
+			chunks = append(chunks, *c)
 		}
-
-		bandsPerFrame := make([][]float64, framesPerWindow)
-		for fi := 0; fi < framesPerWindow; fi++ {
-			frame := windowSlice[fi*frameSize : (fi+1)*frameSize]
-			bandsPerFrame[fi] = frameBandPowers(frame, hamming, sampleRate)
-		}
-
-		chunks = append(chunks, Chunk{
-			StartSec: float64(start) / float64(sampleRate),
-			Hash:     hashBands(bandsPerFrame),
-		})
 	}
 	return chunks
+}
+
+// computeWindowsParallel hashes each window (given by its start sample
+// index) using up to GOMAXPROCS worker goroutines, returning one *Chunk per
+// start index (nil for silent windows that are skipped), in the same order
+// as starts.
+func computeWindowsParallel(samples []float32, starts []int, windowSamples, framesPerWindow, sampleRate int, hamming []float64) []*Chunk {
+	results := make([]*Chunk, len(starts))
+
+	workers := runtime.GOMAXPROCS(0)
+	if workers > len(starts) {
+		workers = len(starts)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+
+	idxCh := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range idxCh {
+				start := starts[i]
+				windowSlice := samples[start : start+windowSamples]
+
+				if rms(windowSlice) < silenceRMSThreshold {
+					continue
+				}
+
+				bandsPerFrame := make([][]float64, framesPerWindow)
+				for fi := 0; fi < framesPerWindow; fi++ {
+					frame := windowSlice[fi*frameSize : (fi+1)*frameSize]
+					bandsPerFrame[fi] = frameBandPowers(frame, hamming, sampleRate)
+				}
+
+				results[i] = &Chunk{
+					StartSec: float64(start) / float64(sampleRate),
+					Hash:     hashBands(bandsPerFrame),
+				}
+			}
+		}()
+	}
+
+	for i := range starts {
+		idxCh <- i
+	}
+	close(idxCh)
+	wg.Wait()
+
+	return results
 }
 
 func rms(samples []float32) float64 {
