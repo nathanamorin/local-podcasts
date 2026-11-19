@@ -22,7 +22,7 @@ RUN go tool swag init -g cmd/server/main.go --output apidocs --parseInternal
 RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -a -installsuffix cgo -o local-podcasts ./cmd/server
 RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -a -installsuffix cgo -o local-podcasts-worker ./cmd/worker
 
-FROM node:16-alpine as app
+FROM node:26-alpine as app
 
 WORKDIR '/app'
 COPY ./app/local-podcasts/ ./
