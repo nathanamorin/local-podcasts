@@ -20,9 +20,10 @@ import (
 var build = "develop"
 
 type appConfig struct {
-	FileHome string `conf:"default:/data,help:directory for podcast audio files and images"`
-	DBPath   string `conf:"help:path to the SQLite database file (defaults to <file-home>/podcasts.db)"`
-	Addr     string `conf:"default::8080,help:listen address for the HTTP server"`
+	FileHome     string `conf:"default:/data,help:directory for podcast audio files and images"`
+	DBPath       string `conf:"help:path to the SQLite database file (defaults to <file-home>/podcasts.db)"`
+	Addr         string `conf:"default::8080,help:listen address for the public HTTP server"`
+	InternalAddr string `conf:"default::8081,help:listen address for the internal worker job API"`
 }
 
 // @title           local-podcasts API
@@ -48,8 +49,8 @@ func main() {
 		cfg.DBPath = filepath.Join(cfg.FileHome, "podcasts.db")
 	}
 
-	klog.Infof("starting local-podcasts build[%s] file-home[%s] db[%s] addr[%s]",
-		build, cfg.FileHome, cfg.DBPath, cfg.Addr)
+	klog.Infof("starting local-podcasts build[%s] file-home[%s] db[%s] addr[%s] internal-addr[%s]",
+		build, cfg.FileHome, cfg.DBPath, cfg.Addr, cfg.InternalAddr)
 
 	podcastConfig := podcast.Config{FileHome: cfg.FileHome}
 
@@ -82,6 +83,17 @@ func main() {
 
 	h := handlers.New(podcastConfig, &pw, db)
 	h.Register(e)
+
+	// The internal worker job API is served on a separate port/listener so
+	// it can be exposed only via a cluster-internal Service, never through
+	// the public Ingress — see handlers.RegisterInternal.
+	internalEcho := echo.New()
+	h.RegisterInternal(internalEcho)
+	go func() {
+		if err := internalEcho.Start(cfg.InternalAddr); err != nil && err != http.ErrServerClosed {
+			klog.Fatalf("internal API server error: %s", err)
+		}
+	}()
 
 	s := gocron.NewScheduler(time.UTC)
 	if _, err = s.Every(10).Minutes().Do(h.EnqueueAll); err != nil {

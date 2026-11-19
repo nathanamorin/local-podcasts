@@ -57,7 +57,7 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		}
 	}
 
-	if err = db.AutoMigrate(&Podcast{}, &Episode{}); err != nil {
+	if err = db.AutoMigrate(&Podcast{}, &Episode{}, &Job{}, &EpisodeFingerprint{}); err != nil {
 		return nil, err
 	}
 

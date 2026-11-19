@@ -15,10 +15,12 @@ COPY . .
 # Generate the OpenAPI/Swagger spec from Go handler annotations (swaggo/swag).
 # This is regenerated on every build so it always matches the current source;
 # the generated apidocs/ package is not committed to version control.
-RUN go tool swag init -g main.go --output apidocs --parseInternal
+RUN go tool swag init -g cmd/server/main.go --output apidocs --parseInternal
 
-# Build
-RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -a -installsuffix cgo -o local-podcasts .
+# Build both binaries: the API server (default CMD) and the worker (used by
+# the separate, horizontally-scalable worker Deployment via command override).
+RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -a -installsuffix cgo -o local-podcasts ./cmd/server
+RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -a -installsuffix cgo -o local-podcasts-worker ./cmd/worker
 
 FROM node:16-alpine as app
 
@@ -42,17 +44,18 @@ RUN adduser -D app
 
 
 COPY --from=build /build/local-podcasts /app/local-podcasts
+COPY --from=build /build/local-podcasts-worker /app/local-podcasts-worker
 COPY --from=app /app/build /app/static/
 
 RUN chown app:app -R /app
-RUN chmod +x /app/local-podcasts
+RUN chmod +x /app/local-podcasts /app/local-podcasts-worker
 
 USER app:app
 
 # This is for documentation purposes only.
 # To actually open the port, runtime parameters
 # must be supplied to the docker command.
-EXPOSE 8080
+EXPOSE 8080 8081
 
 # Run
 CMD [ "/app/local-podcasts" ]

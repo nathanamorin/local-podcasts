@@ -43,7 +43,7 @@ func New(config podcast.Config, pw *podcast.PodcastWatcher, db *gorm.DB) *Handle
 	return &Handler{config: config, pw: pw, db: db}
 }
 
-// Register attaches all routes to the given Echo instance.
+// Register attaches all public-facing routes to the given Echo instance.
 func (h *Handler) Register(e *echo.Echo) {
 	e.GET("/refresh", h.Refresh)
 
@@ -54,6 +54,8 @@ func (h *Handler) Register(e *echo.Echo) {
 	e.GET("/podcasts/:podcast_id/episodes/:episode_id/stream", h.StreamEpisode)
 
 	e.GET("/rss/all", h.RSSAll)
+
+	e.GET("/ads/candidates", h.ListAdCandidates)
 
 	e.GET("/openapi.json", h.OpenAPISpec)
 	e.GET("/doc", h.APIDocs)
@@ -69,6 +71,17 @@ func (h *Handler) Register(e *echo.Echo) {
 	e.GET("/client-status/:key-id", h.GetClientStatus)
 	e.PUT("/client-status/:key-id", h.PutClientStatus)
 	e.DELETE("/client-status/:key-id", h.DeleteClientStatus)
+}
+
+// RegisterInternal attaches the internal worker job API to the given Echo
+// instance. This is served on a separate port/listener from the public
+// routes (see cmd/server/main.go), so it can be exposed only via a
+// cluster-internal Service and never through the public Ingress, without
+// relying on path-based access control.
+func (h *Handler) RegisterInternal(e *echo.Echo) {
+	e.POST("/internal/jobs/claim", h.ClaimJob)
+	e.POST("/internal/jobs/:job_id/complete", h.CompleteJob)
+	e.POST("/internal/jobs/:job_id/upload", h.UploadJobAudio)
 }
 
 func (h *Handler) EnqueueAll() {

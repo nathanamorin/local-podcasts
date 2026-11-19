@@ -30,3 +30,17 @@ Run `make generate-docs` to regenerate the spec locally before `go build`/`go te
 
 `POST /podcasts` accepts either a direct RSS feed URL, or an Apple Podcasts show URL (e.g. `https://podcasts.apple.com/us/podcast/the-daily/id1200361736`), which is automatically resolved to its RSS feed via Apple's free iTunes Lookup API.
 
+# Architecture: background jobs & worker pods
+
+Episode downloading and audio fingerprinting (used for ad detection, see below) run as background jobs rather than inline in request handlers, so this work can be scaled out horizontally onto a separate pool of worker pods instead of the single API server.
+
+- The main server (`cmd/server`) owns the SQLite database and exposes two HTTP listeners:
+  - the public API, on `:8080` (`LOCAL_PODCASTS_ADDR`) — the UI, streaming, `/metrics`, `/ads/candidates`, etc.
+  - an internal job API, on a **separate port**, `:8081` by default (`LOCAL_PODCASTS_INTERNAL_ADDR`) — `POST /internal/jobs/claim`, `POST /internal/jobs/{id}/complete`, `POST /internal/jobs/{id}/upload`. This is meant to be reachable only from worker pods on the cluster-internal network (not exposed via Ingress), not from the public internet; it has no auth of its own.
+- The worker binary (`cmd/worker`, image entrypoint `local-podcasts-worker`) polls the internal API for pending `download`/`fingerprint` jobs, performs them, and reports results back. Workers have **no database access and no shared filesystem/PVC access** — all audio bytes move over plain HTTP:
+  - `download` jobs: the worker fetches the episode's audio from its source RSS URL, then streams it to `/internal/jobs/{id}/upload`, which is what actually persists it to disk (only the main server process can write to its own storage volume).
+  - `fingerprint` jobs: the worker re-fetches the already-downloaded episode via the public `/podcasts/{podcast_id}/episodes/{episode_id}/stream` endpoint, computes audio fingerprints locally, and reports back just the (small) resulting hashes.
+  - A successful `download` job automatically enqueues the corresponding `fingerprint` job.
+  - This design means worker pods are fully stateless and can be scheduled on any node and scaled to any replica count without any storage coupling.
+- Fingerprints are compared across episodes to find segments of audio shared between multiple episodes (candidate ad reads/injected ads), surfaced at `GET /ads/candidates`.
+

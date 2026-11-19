@@ -39,6 +39,11 @@ spec:
         - name: local-podcasts
           # Check packages in github for latest version
           image: ghcr.io/nathanamorin/local-podcasts:<latest release tag here>
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: internal
+              containerPort: 8081
           volumeMounts:
             - name: data-volume
               mountPath: /data
@@ -46,6 +51,40 @@ spec:
         - name: data-volume
           persistentVolumeClaim:
             claimName: data-volume
+---
+# Worker pods perform episode downloads and audio fingerprinting, claimed
+# over HTTP from the main app's internal job API. They need no database
+# access and no shared storage/PVC mount at all - audio bytes move entirely
+# over HTTP (download -> upload to the main app; fingerprint -> re-fetch
+# from the main app's public /stream endpoint), so this Deployment can be
+# scaled to any replica count, on any node, independent of storage topology.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-podcasts-worker
+  namespace: local-podcasts
+  labels:
+    app: local-podcasts-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: local-podcasts-worker
+  template:
+    metadata:
+      labels:
+        app: local-podcasts-worker
+        name: local-podcasts-worker
+    spec:
+      containers:
+        - name: local-podcasts-worker
+          image: ghcr.io/nathanamorin/local-podcasts:<latest release tag here>
+          command: ["/app/local-podcasts-worker"]
+          env:
+            - name: LOCAL_PODCASTS_WORKER_INTERNAL_API_URL
+              value: http://local-podcasts-internal.local-podcasts.svc.cluster.local:8081
+            - name: LOCAL_PODCASTS_WORKER_PUBLIC_API_URL
+              value: http://local-podcasts.local-podcasts.svc.cluster.local:8080
 ---
 apiVersion: v1
 kind: Service
@@ -65,6 +104,23 @@ spec:
     - port: 8080
       targetPort: 8080
       name: local-podcasts
+---
+# Internal job-claim API, consumed only by local-podcasts-worker pods - do
+# not expose this Service via an Ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: local-podcasts-internal
+  namespace: local-podcasts
+  labels:
+    app: local-podcasts
+spec:
+  selector:
+    app: local-podcasts
+  ports:
+    - port: 8081
+      targetPort: 8081
+      name: internal
 ---
 # Scraped by the cluster's Grafana Alloy agent (prometheus.operator.servicemonitors),
 # which forwards to Mimir. Exposes local_podcasts_episode_downloads_total and

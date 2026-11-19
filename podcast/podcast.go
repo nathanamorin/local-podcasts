@@ -20,7 +20,6 @@ import (
 	"github.com/gorilla/feeds"
 	"github.com/hajimehoshi/go-mp3"
 	"github.com/mmcdole/gofeed"
-	"github.com/nathanamorin/local-podcasts/metrics"
 	"gorm.io/gorm"
 	"k8s.io/klog/v2"
 )
@@ -441,6 +440,15 @@ func (p *Podcast) GetAudioFile(config Config, episodeId string) (string, error) 
 	return filePath, nil
 }
 
+// EpisodeByID returns the episode with the given ID (populated via
+// fillEpisodeMap, e.g. by GetPodcast), and whether it was found. Used by the
+// internal job-claim API to look up an episode's remote URL / audio path
+// without requiring callers to know about the internal episodesMap.
+func (p *Podcast) EpisodeByID(episodeID string) (*Episode, bool) {
+	ep, ok := p.episodesMap[episodeID]
+	return ep, ok
+}
+
 func (p *Podcast) mergeNewInfo(newPodcast *Podcast) {
 	p.Name = newPodcast.Name
 	p.ImageFile = newPodcast.ImageFile
@@ -619,7 +627,7 @@ func (p *Podcast) Update(config Config, db *gorm.DB) error {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			if err := p.SyncPodcastEpisode(config, ep); err != nil {
+			if err := p.SyncPodcastEpisode(db, ep); err != nil {
 				klog.Errorf("error syncing episode %s: %s", ep.Name, err)
 				return
 			}
@@ -635,7 +643,10 @@ func (p *Podcast) Update(config Config, db *gorm.DB) error {
 	return nil
 }
 
-func getAudioLength(audioFile string) (int64, error) {
+// GetAudioLength decodes audioFile (mp3) just far enough to compute its
+// duration in seconds. It's a pure, DB-free function so worker pods (which
+// have no database access) can call it directly after downloading a file.
+func GetAudioLength(audioFile string) (int64, error) {
 	info, err := os.Stat(audioFile)
 	if err != nil {
 		return -1, fmt.Errorf("stat %s: %w", audioFile, err)
@@ -660,106 +671,78 @@ func getAudioLength(audioFile string) (int64, error) {
 	return samples / int64(d.SampleRate()), nil
 }
 
-// downloadEpisodeAudio fetches episode.AudioFile (expected to be a raw http(s)
-// URL at this point) into the podcast's data directory, validates it, and
-// updates episode.AudioFile to the local filename on success. It records a
-// local_podcasts_episode_downloads_total metric for every attempt, labeled by
-// podcast and success/failure.
-func (p *Podcast) downloadEpisodeAudio(config Config, episode *Episode) (err error) {
-	defer func() {
-		status := metrics.EpisodeDownloadSuccess
-		if err != nil {
-			status = metrics.EpisodeDownloadFailure
-		}
-		metrics.RecordEpisodeDownload(p.Name, status)
-	}()
-
-	if err := p.checkPodcastDirExists(config); err != nil {
-		return err
+// EpisodeAudioFilename derives the local filename an episode's audio will be
+// saved under, from its remote URL and episode ID. Both the main app (when
+// building a download job's destination path) and worker pods (which must
+// agree on the same filename) use this.
+func EpisodeAudioFilename(episodeID, remoteURL string) string {
+	ext := filepath.Ext(remoteURL)
+	if ext == "" {
+		ext = ".mp3"
 	}
+	ext = strings.Split(ext, "?")[0]
+	return episodeID + ext
+}
 
-	klog.Infof("downloading episode: %s -> %s", p.Name, episode.Name)
-
-	resp, err := httpGetWithUA(episode.AudioFile)
+// DownloadAudioFile fetches url into destPath, validating that the response
+// is actually audio (not an HTML/JSON error page saved by a flaky CDN). It's
+// a pure, DB-free function so it can run unmodified inside worker pods, which
+// have no database access and perform all downloading/fingerprinting work
+// claimed from the main app's internal job API (see handlers/jobs.go).
+func DownloadAudioFile(url, destPath string) (int64, error) {
+	resp, err := httpGetWithUA(url)
 	if err != nil {
-		return fmt.Errorf("GET %s: %w", episode.AudioFile, err)
+		return 0, fmt.Errorf("GET %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected HTTP %d downloading episode %q from %s",
-			resp.StatusCode, episode.Name, episode.AudioFile)
+		return 0, fmt.Errorf("unexpected HTTP %d downloading %s", resp.StatusCode, url)
 	}
-
-	fileExtension := filepath.Ext(episode.AudioFile)
-	if fileExtension == "" {
-		fileExtension = ".mp3"
-	}
-	fileExtension = strings.Split(fileExtension, "?")[0]
-	episodeFilename := episode.Id + fileExtension
-	episodeFilePath := filepath.Join(config.FileHome, p.Id, episodeFilename)
 
 	// Remove any existing (possibly partial) file before writing.
-	if _, err := os.Stat(episodeFilePath); !errors.Is(err, os.ErrNotExist) {
-		if err := os.Remove(episodeFilePath); err != nil {
-			return fmt.Errorf("remove existing file %s: %w", episodeFilePath, err)
+	if _, err := os.Stat(destPath); !errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(destPath); err != nil {
+			return 0, fmt.Errorf("remove existing file %s: %w", destPath, err)
 		}
 	}
 
-	file, err := os.Create(episodeFilePath)
+	file, err := os.Create(destPath)
 	if err != nil {
-		return fmt.Errorf("create %s: %w", episodeFilePath, err)
+		return 0, fmt.Errorf("create %s: %w", destPath, err)
 	}
 
 	n, err := file.ReadFrom(resp.Body)
 	file.Close()
 	if err != nil {
-		os.Remove(episodeFilePath)
-		return fmt.Errorf("write episode %q to %s (wrote %d bytes): %w",
-			episode.Name, episodeFilePath, n, err)
+		os.Remove(destPath)
+		return 0, fmt.Errorf("write %s (wrote %d bytes): %w", destPath, n, err)
 	}
 	if n == 0 {
-		os.Remove(episodeFilePath)
-		return fmt.Errorf("episode %q downloaded 0 bytes from %s", episode.Name, episode.AudioFile)
+		os.Remove(destPath)
+		return 0, fmt.Errorf("downloaded 0 bytes from %s", url)
 	}
 
-	if err := ValidateAudioFile(episodeFilePath); err != nil {
-		os.Remove(episodeFilePath)
-		return fmt.Errorf("episode %q failed audio validation (likely error page): %w", episode.Name, err)
+	if err := ValidateAudioFile(destPath); err != nil {
+		os.Remove(destPath)
+		return 0, fmt.Errorf("failed audio validation (likely error page): %w", err)
 	}
 
-	episode.AudioFile = episodeFilename
-	klog.Infof("downloaded episode: %s -> %s (%d bytes)", p.Name, episode.Name, n)
-	return nil
+	return n, nil
 }
 
-func (p *Podcast) SyncPodcastEpisode(config Config, episode *Episode) error {
-
+// SyncPodcastEpisode no longer downloads audio or computes length in-process
+// — that work (CPU/IO heavy) is done by separate, horizontally-scalable
+// worker pods. This just enqueues a download job the first time an episode
+// with a remote (http) AudioFile is seen; once a worker completes it,
+// podcast.CompleteJob updates the Episode row directly (AudioFile/Length)
+// and chains a fingerprint job.
+func (p *Podcast) SyncPodcastEpisode(db *gorm.DB, episode *Episode) error {
 	if strings.HasPrefix(episode.AudioFile, "http") {
-		if err := p.downloadEpisodeAudio(config, episode); err != nil {
-			return err
+		if err := EnqueueDownloadJob(db, p.Id, episode.Id); err != nil {
+			return fmt.Errorf("enqueue download job for episode %q: %w", episode.Name, err)
 		}
 	}
-
-	if episode.Length <= 0 {
-		audioFile, err := p.GetAudioFile(config, episode.Id)
-		if err != nil {
-			return fmt.Errorf("locate audio file for episode %q: %w", episode.Name, err)
-		}
-
-		audioLength, err := getAudioLength(audioFile)
-		if err != nil {
-			// Non-fatal: length is cosmetic. Log, delete corrupt file so it
-			// re-downloads next cycle, and continue.
-			klog.Warningf("could not determine length of %q (%s), file may be corrupt — deleting for re-download: %s",
-				episode.Name, audioFile, err)
-			os.Remove(audioFile)
-			episode.AudioFile = strings.TrimPrefix(episode.AudioFile, filepath.Base(audioFile))
-			return nil
-		}
-		episode.Length = audioLength
-	}
-
 	return nil
 }
 

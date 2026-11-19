@@ -9,6 +9,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi2conv"
 	"github.com/labstack/echo/v4"
 	"github.com/nathanamorin/local-podcasts/apidocs"
+	"github.com/nathanamorin/local-podcasts/podcast"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/swaggo/swag"
 	"k8s.io/klog/v2"
@@ -102,6 +103,7 @@ func (h *Handler) RedocBundle(c echo.Context) error {
 // @Success      200
 // @Router       /metrics [get]
 func (h *Handler) Metrics(c echo.Context) error {
+	podcast.RefreshJobGauges(h.db)
 	promhttp.Handler().ServeHTTP(c.Response(), c.Request())
 	return nil
 }
