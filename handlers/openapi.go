@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	_ "embed"
 	"encoding/json"
 	"net/http"
 
@@ -12,8 +13,15 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// redocBundleJS is the Redoc standalone UI bundle, vendored and embedded into
+// the binary so /doc and /docs render with no external (CDN) dependencies.
+//
+//go:embed assets/redoc.standalone.js
+var redocBundleJS []byte
+
 // redocHTML renders the Redoc UI, pointing it at the dynamically generated
-// OpenAPI 3 spec served by OpenAPISpec.
+// OpenAPI 3 spec served by OpenAPISpec. The Redoc JS bundle is served from
+// this same origin (see RedocBundle) instead of a CDN.
 const redocHTML = `<!DOCTYPE html>
 <html>
   <head>
@@ -24,7 +32,7 @@ const redocHTML = `<!DOCTYPE html>
   </head>
   <body>
     <redoc spec-url="/openapi.json"></redoc>
-    <script src="https://cdn.redoc.ly/redoc/latest/bundle.js"></script>
+    <script src="/doc/redoc.standalone.js"></script>
   </body>
 </html>`
 
@@ -72,4 +80,15 @@ func (h *Handler) OpenAPISpec(c echo.Context) error {
 // @Router       /docs [get]
 func (h *Handler) APIDocs(c echo.Context) error {
 	return c.HTML(http.StatusOK, redocHTML)
+}
+
+// RedocBundle godoc
+// @Summary      Redoc UI bundle (vendored)
+// @Description  Serves the Redoc standalone JS bundle embedded in the binary, so API docs render with no external CDN dependency.
+// @Tags         docs
+// @Produce      text/javascript
+// @Success      200
+// @Router       /doc/redoc.standalone.js [get]
+func (h *Handler) RedocBundle(c echo.Context) error {
+	return c.Blob(http.StatusOK, "text/javascript; charset=utf-8", redocBundleJS)
 }
