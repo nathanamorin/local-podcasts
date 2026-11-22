@@ -103,7 +103,7 @@ func (h *Handler) RedocBundle(c echo.Context) error {
 // @Success      200
 // @Router       /metrics [get]
 func (h *Handler) Metrics(c echo.Context) error {
-	podcast.RefreshJobGauges(h.db)
+	podcast.RefreshJobGauges(h.readDB)
 	promhttp.Handler().ServeHTTP(c.Response(), c.Request())
 	return nil
 }

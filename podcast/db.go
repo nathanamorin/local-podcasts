@@ -10,14 +10,9 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// maxOpenConns bounds how many concurrent physical SQLite connections the
-// pool may hand out for a file-backed DB. SQLite still only allows one
-// writer at a time (writes beyond that block on busy_timeout below), but in
-// WAL mode readers don't block the writer or each other, so this lets
-// cheap, frequent reads (e.g. the /metrics job-count queries) run
-// concurrently with the app's write-heavy RSS sync instead of queuing
-// behind it on a single shared connection.
-const maxOpenConns = 4
+// DefaultReadOnlyMaxOpenConns is the recommended maxOpenConns for
+// InitReadOnlyDB when the caller has no specific reason to override it.
+const DefaultReadOnlyMaxOpenConns = 4
 
 func InitDB(dbPath string) (*gorm.DB, error) {
 	dsn := dbPath
@@ -70,8 +65,15 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		return nil, err
 	}
 	if isFileBacked {
-		sqlDB.SetMaxOpenConns(maxOpenConns)
-		sqlDB.SetMaxIdleConns(maxOpenConns)
+		// Writes must stay serialized - SQLite only allows one writer at a
+		// time, and with enough concurrent writers (e.g. a KEDA-scaled
+		// worker fleet) allowing >1 connection here just moves contention
+		// from Go's connection-acquisition queue (always eventually
+		// succeeds) into SQLite's own locking (fails outright with
+		// SQLITE_BUSY once busy_timeout is exceeded). Concurrent read
+		// capacity for things like /metrics comes from InitReadOnlyDB
+		// instead, which doesn't contend with the writer under WAL.
+		sqlDB.SetMaxOpenConns(1)
 	} else {
 		// A ":memory:" DSN gives each new physical connection its own
 		// independent, empty in-memory database - multiple connections
@@ -90,6 +92,52 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 	if err = db.AutoMigrate(&Podcast{}, &Episode{}, &Job{}, &EpisodeFingerprint{}); err != nil {
 		return nil, err
 	}
+
+	return db, nil
+}
+
+// InitReadOnlyDB opens a second connection pool against the same database,
+// intended only for cheap, latency-sensitive read-only queries (currently:
+// the /metrics job-queue gauge refresh) that must not queue behind the
+// app's single serialized writer connection (see InitDB). Connections are
+// marked query_only so a bug can't accidentally turn this into a second
+// writer and reintroduce SQLITE_BUSY contention. maxOpenConns bounds how
+// many of these read-only connections may run concurrently - since none of
+// them ever write, this can safely be raised without risking writer
+// contention (WAL readers see a consistent snapshot without blocking on,
+// or being blocked by, the writer); callers with no specific reason to
+// override it should pass DefaultReadOnlyMaxOpenConns.
+//
+// For ":memory:" dbPath (tests), a second connection would open its own
+// independent, empty database, so writeDB is returned directly instead -
+// tests exercising RefreshJobGauges share the single in-memory connection
+// just like before this split existed.
+func InitReadOnlyDB(dbPath string, writeDB *gorm.DB, maxOpenConns int) (*gorm.DB, error) {
+	if dbPath == ":memory:" {
+		return writeDB, nil
+	}
+
+	pragmas := url.Values{
+		"_pragma": []string{
+			"busy_timeout(10000)",
+			"query_only(1)",
+		},
+	}
+	dsn := dbPath + "?" + pragmas.Encode()
+
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	sqlDB.SetMaxOpenConns(maxOpenConns)
+	sqlDB.SetMaxIdleConns(maxOpenConns)
 
 	return db, nil
 }

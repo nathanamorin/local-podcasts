@@ -20,10 +20,11 @@ import (
 var build = "develop"
 
 type appConfig struct {
-	FileHome     string `conf:"default:/data,help:directory for podcast audio files and images"`
-	DBPath       string `conf:"help:path to the SQLite database file (defaults to <file-home>/podcasts.db)"`
-	Addr         string `conf:"default::8080,help:listen address for the public HTTP server"`
-	InternalAddr string `conf:"default::8081,help:listen address for the internal worker job API"`
+	FileHome           string `conf:"default:/data,help:directory for podcast audio files and images"`
+	DBPath             string `conf:"help:path to the SQLite database file (defaults to <file-home>/podcasts.db)"`
+	Addr               string `conf:"default::8080,help:listen address for the public HTTP server"`
+	InternalAddr       string `conf:"default::8081,help:listen address for the internal worker job API"`
+	ReadDBMaxOpenConns int    `conf:"default:4,help:max concurrent connections for the read-only DB pool used by /metrics (see podcast.InitReadOnlyDB)"`
 }
 
 // @title           local-podcasts API
@@ -70,6 +71,11 @@ func main() {
 		klog.Fatalf("error initializing database: %s", err)
 	}
 
+	readDB, err := podcast.InitReadOnlyDB(cfg.DBPath, db, cfg.ReadDBMaxOpenConns)
+	if err != nil {
+		klog.Fatalf("error initializing read-only database: %s", err)
+	}
+
 	if err := podcast.MigrateFromFiles(podcastConfig, db); err != nil {
 		klog.Errorf("error running file migration: %s", err)
 	}
@@ -81,7 +87,7 @@ func main() {
 
 	e := echo.New()
 
-	h := handlers.New(podcastConfig, &pw, db)
+	h := handlers.New(podcastConfig, &pw, db, readDB)
 	h.Register(e)
 
 	// The internal worker job API is served on a separate port/listener so

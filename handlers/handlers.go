@@ -37,10 +37,11 @@ type Handler struct {
 	config podcast.Config
 	pw     *podcast.PodcastWatcher
 	db     *gorm.DB
+	readDB *gorm.DB
 }
 
-func New(config podcast.Config, pw *podcast.PodcastWatcher, db *gorm.DB) *Handler {
-	return &Handler{config: config, pw: pw, db: db}
+func New(config podcast.Config, pw *podcast.PodcastWatcher, db *gorm.DB, readDB *gorm.DB) *Handler {
+	return &Handler{config: config, pw: pw, db: db, readDB: readDB}
 }
 
 // Register attaches all public-facing routes to the given Echo instance.
