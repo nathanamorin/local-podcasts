@@ -228,13 +228,9 @@ func (h *Handler) StreamEpisode(c echo.Context) error {
 	podcastID := c.Param("podcast_id")
 	episodeID := c.Param("episode_id")
 
-	podcastData, err := h.pw.GetPodcast(podcastID)
-	if err != nil {
-		klog.Errorf("error getting podcast %s: %s", podcastID, err)
-		return c.String(http.StatusInternalServerError, `{"error": "error getting podcast"}`)
-	}
-
-	filePath, err := podcastData.GetAudioFile(h.config, episodeID)
+	// Resolved via the pooled readDB (not h.pw.GetPodcast / the single-
+	// connection writer) - see podcast.GetEpisodeAudioFilePath.
+	filePath, err := podcast.GetEpisodeAudioFilePath(h.readDB, h.config, podcastID, episodeID)
 	if err != nil {
 		klog.Errorf("error getting audio file for episode %s/%s: %s", podcastID, episodeID, err)
 		return c.String(http.StatusInternalServerError, `{"error": "error getting stream"}`)

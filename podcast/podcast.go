@@ -440,6 +440,24 @@ func (p *Podcast) GetAudioFile(config Config, episodeId string) (string, error) 
 	return filePath, nil
 }
 
+// GetEpisodeAudioFilePath resolves an episode's on-disk audio path via a
+// single-row query against readDB (the read-only connection pool), instead
+// of going through PodcastWatcher.GetPodcast (which Preloads every episode
+// of the podcast through the single-connection writer pool). It's used on
+// the hot path serving episode streams to worker fingerprinting requests -
+// at high worker concurrency, routing this through the writer pool put it
+// in direct contention with every concurrent ClaimJob/CompleteJob call and
+// could queue for minutes; readDB's pooled connections never block on (or
+// get blocked by) the writer in WAL mode.
+func GetEpisodeAudioFilePath(readDB *gorm.DB, config Config, podcastID, episodeID string) (string, error) {
+	var episode Episode
+	if err := readDB.Where("podcast_id = ? AND id = ?", podcastID, episodeID).First(&episode).Error; err != nil {
+		return "", fmt.Errorf("episode id (%s) not found: %w", episodeID, err)
+	}
+	return filepath.Join(config.FileHome, podcastID, episode.AudioFile), nil
+}
+
+
 // EpisodeByID returns the episode with the given ID (populated via
 // fillEpisodeMap, e.g. by GetPodcast), and whether it was found. Used by the
 // internal job-claim API to look up an episode's remote URL / audio path

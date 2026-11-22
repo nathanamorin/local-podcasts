@@ -143,6 +143,33 @@ func TestGetPodcast_NotFound(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestGetEpisodeAudioFilePath(t *testing.T) {
+	db := openTestDB(t)
+	config := tempConfig(t)
+
+	p := mustParseRss(t, testData, "https://test123")
+	savePodcast(t, p, config, db)
+	episodeID := p.Episodes[0].Id
+	wantPath := filepath.Join(config.FileHome, p.Id, p.Episodes[0].AudioFile)
+
+	// A single-row query directly against db stands in for readDB here -
+	// the function itself is DB-pool-agnostic.
+	gotPath, err := GetEpisodeAudioFilePath(db, config, p.Id, episodeID)
+	require.NoError(t, err)
+	assert.Equal(t, wantPath, gotPath)
+}
+
+func TestGetEpisodeAudioFilePath_NotFound(t *testing.T) {
+	db := openTestDB(t)
+	config := tempConfig(t)
+
+	p := mustParseRss(t, testData, "https://test123")
+	savePodcast(t, p, config, db)
+
+	_, err := GetEpisodeAudioFilePath(db, config, p.Id, "doesnotexist")
+	assert.Error(t, err)
+}
+
 // ---------------------------------------------------------------------------
 // ListPodcasts & cache
 // ---------------------------------------------------------------------------
