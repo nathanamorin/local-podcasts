@@ -1,6 +1,7 @@
 package podcast
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,7 +41,7 @@ func collectQueryDurationLabels(t *testing.T) []map[string]string {
 // unbounded cardinality from the actual parameter data.
 func TestRegisterQueryDurationCallbacks_WriteDB(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := InitDB(dbPath)
+	db, err := InitDB(dbPath, DefaultWriteMaxOpenConns)
 	require.NoError(t, err)
 
 	var count int64
@@ -60,4 +61,34 @@ func TestRegisterQueryDurationCallbacks_WriteDB(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "expected a query-duration series for a podcasts query, got labels: %v", labels)
+}
+
+// TestInitDB_ConcurrentWriters verifies that raising maxOpenConns above 1
+// lets multiple goroutines write concurrently without "database is locked"
+// errors, confirming the DSN pragmas (WAL + busy_timeout) really do apply
+// to every pooled connection and not just the first one opened.
+func TestInitDB_ConcurrentWriters(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := InitDB(dbPath, 4)
+	require.NoError(t, err)
+
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	assert.Equal(t, 4, sqlDB.Stats().MaxOpenConnections)
+
+	const writers = 8
+	errs := make(chan error, writers)
+	for i := 0; i < writers; i++ {
+		go func(i int) {
+			p := &Podcast{Id: fmt.Sprintf("pod-%d", i), Name: "test"}
+			errs <- db.Create(p).Error
+		}(i)
+	}
+	for i := 0; i < writers; i++ {
+		assert.NoError(t, <-errs)
+	}
+
+	var count int64
+	require.NoError(t, db.Model(&Podcast{}).Count(&count).Error)
+	assert.Equal(t, int64(writers), count)
 }

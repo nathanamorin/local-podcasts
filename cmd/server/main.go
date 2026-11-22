@@ -24,7 +24,8 @@ type appConfig struct {
 	DBPath             string `conf:"help:path to the SQLite database file (defaults to <file-home>/podcasts.db)"`
 	Addr               string `conf:"default::8080,help:listen address for the public HTTP server"`
 	InternalAddr       string `conf:"default::8081,help:listen address for the internal worker job API"`
-	ReadDBMaxOpenConns int    `conf:"default:4,help:max concurrent connections for the read-only DB pool used by /metrics (see podcast.InitReadOnlyDB)"`
+	ReadDBMaxOpenConns  int `conf:"default:4,help:max concurrent connections for the read-only DB pool used by /metrics (see podcast.InitReadOnlyDB)"`
+	WriteDBMaxOpenConns int `conf:"default:4,help:max concurrent connections for the writer DB pool used by job claim/complete and all other mutations (see podcast.InitDB); SQLite still only allows one writer to commit at a time, so this trades Go-level queueing for SQLite-level lock queueing under worker concurrency"`
 }
 
 // @title           local-podcasts API
@@ -66,7 +67,7 @@ func main() {
 		}
 	}
 
-	db, err := podcast.InitDB(cfg.DBPath)
+	db, err := podcast.InitDB(cfg.DBPath, cfg.WriteDBMaxOpenConns)
 	if err != nil {
 		klog.Fatalf("error initializing database: %s", err)
 	}

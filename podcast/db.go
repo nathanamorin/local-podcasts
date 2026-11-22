@@ -16,7 +16,19 @@ import (
 // InitReadOnlyDB when the caller has no specific reason to override it.
 const DefaultReadOnlyMaxOpenConns = 4
 
-func InitDB(dbPath string) (*gorm.DB, error) {
+// DefaultWriteMaxOpenConns is the recommended maxOpenConns for InitDB's
+// writer pool when the caller has no specific reason to override it. See
+// InitDB's SetMaxOpenConns comment for the tradeoff this controls.
+const DefaultWriteMaxOpenConns = 4
+
+// InitDB opens the primary (writer) database connection pool.
+// maxOpenConns bounds how many concurrent writer connections are allowed
+// (see the SetMaxOpenConns comment below for the tradeoff); callers with no
+// specific reason to override it should pass DefaultWriteMaxOpenConns. For
+// ":memory:" dbPath (tests), this is always forced to 1 regardless of the
+// argument, since additional in-memory connections would each get their
+// own independent, empty database.
+func InitDB(dbPath string, maxOpenConns int) (*gorm.DB, error) {
 	dsn := dbPath
 	isFileBacked := dbPath != ":memory:"
 
@@ -67,15 +79,35 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		return nil, err
 	}
 	if isFileBacked {
-		// Writes must stay serialized - SQLite only allows one writer at a
-		// time, and with enough concurrent writers (e.g. a KEDA-scaled
-		// worker fleet) allowing >1 connection here just moves contention
-		// from Go's connection-acquisition queue (always eventually
-		// succeeds) into SQLite's own locking (fails outright with
-		// SQLITE_BUSY once busy_timeout is exceeded). Concurrent read
-		// capacity for things like /metrics comes from InitReadOnlyDB
-		// instead, which doesn't contend with the writer under WAL.
-		sqlDB.SetMaxOpenConns(1)
+		// SQLite still only allows one writer transaction to actually
+		// commit at a time - raising this above 1 does not add write
+		// parallelism at the storage layer. What it does do is move
+		// queued writers from Go's connection-acquisition queue (which
+		// serializes every single claim/complete call behind whichever
+		// one request happens to be mid-flight) into SQLite's own
+		// locking, where up to maxOpenConns writers can be mid-transaction
+		// (one actually holding the write lock, the rest blocked inside
+		// SQLite waiting on it, up to busy_timeout before failing with
+		// SQLITE_BUSY) instead of waiting in Go first. Under heavy worker
+		// concurrency this reduces end-to-end latency because Go's queue
+		// has no timeout/short-circuit at all, so a slow write (e.g. due
+		// to Ceph RBD-backed storage latency) can back up every other
+		// request for a long time; letting a few more requests be
+		// "in flight" against SQLite directly reduces that pileup, as
+		// long as maxOpenConns stays modest enough that busy_timeout
+		// (currently 10s) comfortably covers the realistic wait. The
+		// pragmas above are applied via the DSN specifically so that
+		// every one of these additional pooled connections gets
+		// WAL/busy_timeout/synchronous, not just the first - without
+		// that, raising this would reintroduce "database is locked"
+		// errors. Concurrent *read* capacity for things like /metrics
+		// comes from InitReadOnlyDB instead, which doesn't contend with
+		// the writer under WAL at all.
+		if maxOpenConns < 1 {
+			maxOpenConns = 1
+		}
+		sqlDB.SetMaxOpenConns(maxOpenConns)
+		sqlDB.SetMaxIdleConns(maxOpenConns)
 	} else {
 		// A ":memory:" DSN gives each new physical connection its own
 		// independent, empty in-memory database - multiple connections

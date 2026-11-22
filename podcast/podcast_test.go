@@ -19,7 +19,7 @@ import (
 
 func openTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := InitDB(":memory:")
+	db, err := InitDB(":memory:", 1)
 	require.NoError(t, err)
 	return db
 }
