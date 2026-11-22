@@ -153,10 +153,10 @@ func EnqueueFingerprintJob(db *gorm.DB, podcastID, episodeID string) error {
 // Deliberately avoids a single "id NOT IN (SELECT episode_id FROM
 // episode_fingerprints)" query: SQLite planned that as a per-episode
 // correlated scan of the (large, chunk-per-5s-window) fingerprints table,
-// which - combined with the app's single shared DB connection
-// (SetMaxOpenConns(1)) - stalled all other DB access for the entire app for
-// several minutes. Two cheap indexed queries plus an in-memory set diff
-// avoids that.
+// which - combined with the app's small shared connection pool (see
+// podcast/db.go) - tied up every available connection and stalled other DB
+// access for the entire app for several minutes. Two cheap indexed queries
+// plus an in-memory set diff avoids that.
 func EnqueueMissingFingerprintJobs(db *gorm.DB) (int, error) {
 	var episodes []Episode
 	if err := db.Model(&Episode{}).Where("audio_file != ?", "").Find(&episodes).Error; err != nil {
