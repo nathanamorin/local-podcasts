@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/glebarez/sqlite"
 	"github.com/nathanamorin/local-podcasts/podcast"
@@ -67,49 +68,79 @@ func main() {
 	log.Println("migration completed successfully")
 }
 
-// upsert copies every row of model T from src to dst in batches, in-place
-// overwriting any existing row with the same primary key (ON CONFLICT DO
-// UPDATE) so the tool is safely re-runnable if it's interrupted partway
-// through. orderBy must reference column(s) that uniquely and stably order
-// every row (e.g. the primary key) - FindInBatches pages through the source
-// with repeated LIMIT/OFFSET queries, and without a deterministic ORDER BY,
-// SQLite doesn't guarantee the same row order across those queries, which
-// can silently skip or duplicate rows near batch boundaries.
-func upsert[T any](src, dst *gorm.DB, label, orderBy string) error {
+// upsert copies every row of model T from src to dst, in-place overwriting
+// any existing row with the same primary key (ON CONFLICT DO UPDATE) so the
+// tool is safely re-runnable if it's interrupted partway through.
+//
+// It paginates using keyset ("seek method") pagination - WHERE (pkCols) >
+// (last seen values) ORDER BY pkCols LIMIT batchSize - rather than GORM's
+// built-in FindInBatches, which pages via LIMIT/OFFSET. OFFSET-based
+// pagination has a well-known failure mode: it re-executes a fresh query
+// per batch, and if any batch happens to return fewer than batchSize rows
+// before the true end of the table (observed in practice against SQLite
+// here), FindInBatches treats that as the final batch and stops silently,
+// well short of the actual row count - no error, no stall, just missing
+// data in the destination, surfaced only indirectly if a count comparison
+// is extremely careful. Keyset pagination can't repeat or skip rows: each
+// page is strictly "rows after the last primary key we saw", so it only
+// stops when a page is genuinely empty.
+//
+// pkCols are column names forming the primary key, in a stable sort order.
+// pkOf extracts those same column values (in the same order) from a row, for
+// building the next page's WHERE clause.
+func upsert[T any](src, dst *gorm.DB, label string, pkCols []string, pkOf func(T) []any) error {
 	var total int64
-	err := src.Session(&gorm.Session{}).Model(new(T)).Order(orderBy).FindInBatches(&[]T{}, batchSize, func(tx *gorm.DB, batchNum int) error {
-		rows, ok := tx.Statement.Dest.(*[]T)
-		if !ok || len(*rows) == 0 {
-			return nil
+	var lastPK []any
+	placeholder := fmt.Sprintf("(%s) > (%s)", strings.Join(pkCols, ", "), strings.TrimSuffix(strings.Repeat("?,", len(pkCols)), ","))
+	for {
+		q := src.Session(&gorm.Session{}).Model(new(T)).Order(strings.Join(pkCols, ", ")).Limit(batchSize)
+		if lastPK != nil {
+			q = q.Where(placeholder, lastPK...)
 		}
-		if err := dst.Clauses(clause.OnConflict{UpdateAll: true}).CreateInBatches(rows, batchSize).Error; err != nil {
-			return fmt.Errorf("write batch %d: %w", batchNum, err)
+		var batch []T
+		if err := q.Find(&batch).Error; err != nil {
+			return fmt.Errorf("read page: %w", err)
 		}
-		total += int64(len(*rows))
+		if len(batch) == 0 {
+			break
+		}
+		if err := dst.Clauses(clause.OnConflict{UpdateAll: true}).CreateInBatches(&batch, batchSize).Error; err != nil {
+			return fmt.Errorf("write page: %w", err)
+		}
+		total += int64(len(batch))
 		log.Printf("%s: copied %d rows so far", label, total)
-		return nil
-	}).Error
-	if err != nil {
-		return err
+		lastPK = pkOf(batch[len(batch)-1])
+		if len(batch) < batchSize {
+			break
+		}
 	}
 	log.Printf("%s: done, %d rows total", label, total)
 	return nil
 }
 
 func copyPodcasts(src, dst *gorm.DB) error {
-	return upsert[podcast.Podcast](src, dst, "podcasts", "id")
+	return upsert(src, dst, "podcasts", []string{"id"}, func(p podcast.Podcast) []any {
+		return []any{p.Id}
+	})
 }
 
 func copyEpisodes(src, dst *gorm.DB) error {
-	return upsert[podcast.Episode](src, dst, "episodes", "podcast_id, id")
+	return upsert(src, dst, "episodes", []string{"podcast_id", "id"}, func(e podcast.Episode) []any {
+		return []any{e.PodcastID, e.Id}
+	})
 }
 
 func copyJobs(src, dst *gorm.DB) error {
-	return upsert[podcast.Job](src, dst, "jobs", "id")
+	return upsert(src, dst, "jobs", []string{"id"}, func(j podcast.Job) []any {
+		return []any{j.ID}
+	})
 }
 
 func copyFingerprints(src, dst *gorm.DB) error {
-	if err := upsert[podcast.EpisodeFingerprint](src, dst, "episode_fingerprints", "id"); err != nil {
+	err := upsert(src, dst, "episode_fingerprints", []string{"id"}, func(f podcast.EpisodeFingerprint) []any {
+		return []any{f.ID}
+	})
+	if err != nil {
 		return err
 	}
 	// Explicit IDs were preserved during the copy, so Postgres' auto-
