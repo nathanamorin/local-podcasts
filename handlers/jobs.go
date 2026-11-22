@@ -210,3 +210,26 @@ func (h *Handler) UploadJobAudio(c echo.Context) error {
 	h.pw.InvalidateCache()
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
+
+// queueLengthResponse is served by QueueLength for KEDA's metrics-api
+// scaler trigger.
+type queueLengthResponse struct {
+	QueueLength int64 `json:"queueLength"`
+}
+
+// QueueLength godoc
+// @Summary      Pending job queue length
+// @Description  Internal API used by KEDA's metrics-api scaler trigger to read the current total pending job count (across all job types) directly from the app, without going through a Prometheus scrape/query round-trip. Not intended for external/user use.
+// @Tags         internal
+// @Produce      json
+// @Success      200  {object}  queueLengthResponse
+// @Failure      500  {object}  map[string]string
+// @Router       /internal/jobs/queue-length [get]
+func (h *Handler) QueueLength(c echo.Context) error {
+	count, err := podcast.PendingJobCount(h.readDB)
+	if err != nil {
+		klog.Errorf("error counting pending jobs: %s", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "error counting pending jobs"})
+	}
+	return c.JSON(http.StatusOK, queueLengthResponse{QueueLength: count})
+}

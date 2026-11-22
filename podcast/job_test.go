@@ -212,3 +212,27 @@ func TestCompleteJob_FailureRequeuesUntilMaxAttempts(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, job)
 }
+
+func TestPendingJobCount(t *testing.T) {
+	db := openTestDB(t)
+
+	count, err := PendingJobCount(db)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count)
+
+	require.NoError(t, EnqueueDownloadJob(db, "pod1", "ep1"))
+	require.NoError(t, EnqueueFingerprintJob(db, "pod1", "ep2"))
+
+	count, err = PendingJobCount(db)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count, "should count pending jobs across all types")
+
+	// Claiming a job moves it to processing, so it should no longer count.
+	job, err := ClaimJob(db, []JobType{JobTypeDownload}, "worker-1")
+	require.NoError(t, err)
+	require.NotNil(t, job)
+
+	count, err = PendingJobCount(db)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+}

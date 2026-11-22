@@ -420,3 +420,18 @@ func countJobs(db *gorm.DB, jobType JobType, status JobStatus) float64 {
 	}
 	return float64(count)
 }
+
+// PendingJobCount returns the total number of jobs (across all types)
+// currently pending. Used as the signal for KEDA's metrics-api scaler (see
+// handlers.QueueLength) - a single direct COUNT query served straight from
+// the app, rather than relying on a Prometheus scrape of /metrics and a
+// subsequent Mimir query round-trip, which can briefly report stale/missing
+// data (e.g. around a Recreate-strategy deploy of this single-replica app)
+// and cause the worker fleet to flap.
+func PendingJobCount(db *gorm.DB) (int64, error) {
+	var count int64
+	if err := db.Model(&Job{}).Where("status = ?", JobStatusPending).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}

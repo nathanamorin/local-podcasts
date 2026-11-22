@@ -84,6 +84,7 @@ func (h *Handler) RegisterInternal(e *echo.Echo) {
 	e.POST("/internal/jobs/claim", h.ClaimJob)
 	e.POST("/internal/jobs/:job_id/complete", h.CompleteJob)
 	e.POST("/internal/jobs/:job_id/upload", h.UploadJobAudio)
+	e.GET("/internal/jobs/queue-length", h.QueueLength)
 }
 
 func (h *Handler) EnqueueAll() {
