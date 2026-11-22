@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/nathanamorin/local-podcasts/metrics"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"k8s.io/klog/v2"
 )
 
@@ -248,8 +249,19 @@ func ClaimJob(db *gorm.DB, types []JobType, workerID string) (*Job, error) {
 
 	var claimed *Job
 	err := db.Transaction(func(tx *gorm.DB) error {
+		// Unlike SQLite (where a single physical writer made a plain read-
+		// then-write safe by construction), PostgreSQL allows truly
+		// concurrent transactions, so a plain SELECT here could let two
+		// worker claims race to read the same pending job before either
+		// commits its update (a lost-update/double-claim bug). FOR UPDATE
+		// SKIP LOCKED makes the claim atomic: it row-locks the selected
+		// job for this transaction and instructs other concurrent claims
+		// to skip rows already locked by an in-flight claim instead of
+		// blocking on them, so many worker pods can claim different
+		// pending jobs in parallel without ever double-claiming one.
 		var job Job
-		err := tx.Where("type IN ? AND status = ?", types, JobStatusPending).
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("type IN ? AND status = ?", types, JobStatusPending).
 			Order("created_at").
 			First(&job).Error
 		if err != nil {

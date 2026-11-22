@@ -2,14 +2,18 @@ package podcast
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -17,10 +21,51 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
+// testDatabaseDSN is the base PostgreSQL connection string tests connect
+// with. Override via LOCAL_PODCASTS_TEST_DATABASE_URL (CI sets this to its
+// postgres service container); defaults to a local dev Postgres on 5433
+// (see docker-compose.yml / README).
+func testDatabaseDSN() string {
+	if dsn := os.Getenv("LOCAL_PODCASTS_TEST_DATABASE_URL"); dsn != "" {
+		return dsn
+	}
+	return "postgres://postgres:postgres@localhost:5433/local_podcasts_test?sslmode=disable"
+}
+
+// openTestDB opens a connection to a real PostgreSQL database (tests need
+// genuine Postgres semantics - e.g. ClaimJob's FOR UPDATE SKIP LOCKED
+// concurrency behavior - that a fake/in-memory DB can't reproduce), isolated
+// into its own schema so tests never see another test's rows. The schema is
+// dropped on test cleanup.
 func openTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := InitDB(":memory:", 1)
+
+	schema := "test_" + strings.ReplaceAll(uuid.NewString(), "-", "_")
+	sep := "?"
+	if strings.Contains(testDatabaseDSN(), "?") {
+		sep = "&"
+	}
+	dsn := fmt.Sprintf("%s%ssearch_path=%s", testDatabaseDSN(), sep, schema)
+
+	setup, err := gorm.Open(postgres.Open(testDatabaseDSN()))
+	require.NoError(t, err, "connect to test postgres at %s (see LOCAL_PODCASTS_TEST_DATABASE_URL)", testDatabaseDSN())
+	require.NoError(t, setup.Exec(fmt.Sprintf("CREATE SCHEMA %q", schema)).Error)
+	t.Cleanup(func() {
+		_ = setup.Exec(fmt.Sprintf("DROP SCHEMA %q CASCADE", schema)).Error
+		sqlDB, err := setup.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	db, err := InitDB(dsn, 4)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		sqlDB, err := db.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 	return db
 }
 
@@ -216,7 +261,7 @@ func TestListPodcasts_UsesCache(t *testing.T) {
 	for _, ep := range p2.Episodes {
 		ep.PodcastID = p2.Id
 	}
-	require.NoError(t, db.Session(&gorm.Session{FullSaveAssociations: true}).Save(&p2).Error)
+	require.NoError(t, p2.SavePodcastMetadata(config, db))
 
 	// Cached result should still show only 1.
 	cached, err := pw.ListPodcasts()
@@ -243,7 +288,7 @@ func TestInvalidateCache(t *testing.T) {
 	for _, ep := range p2.Episodes {
 		ep.PodcastID = p2.Id
 	}
-	require.NoError(t, db.Session(&gorm.Session{FullSaveAssociations: true}).Save(&p2).Error)
+	require.NoError(t, p2.SavePodcastMetadata(config, db))
 
 	pw.InvalidateCache()
 

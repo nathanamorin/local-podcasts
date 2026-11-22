@@ -2,7 +2,6 @@ package podcast
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -34,15 +33,13 @@ func collectQueryDurationLabels(t *testing.T) []map[string]string {
 	return all
 }
 
-// TestRegisterQueryDurationCallbacks_WriteDB verifies that InitDB (a
-// file-backed, "write" pool) instruments queries into metrics.QueryDuration
-// with a parameterized SQL template label - not table name, not bound
-// parameter values - so dashboards can see per-query latency without
-// unbounded cardinality from the actual parameter data.
+// TestRegisterQueryDurationCallbacks_WriteDB verifies that InitDB
+// instruments queries into metrics.QueryDuration with a parameterized SQL
+// template label - not table name, not bound parameter values - so
+// dashboards can see per-query latency without unbounded cardinality from
+// the actual parameter data.
 func TestRegisterQueryDurationCallbacks_WriteDB(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := InitDB(dbPath, DefaultWriteMaxOpenConns)
-	require.NoError(t, err)
+	db := openTestDB(t)
 
 	var count int64
 	require.NoError(t, db.Model(&Podcast{}).Where("id = ?", "some-id").Count(&count).Error)
@@ -52,25 +49,24 @@ func TestRegisterQueryDurationCallbacks_WriteDB(t *testing.T) {
 
 	var found bool
 	for _, l := range labels {
-		if l["db"] == "write" && l["operation"] == "query" && strings.Contains(l["query"], "podcasts") {
+		if l["db"] == "primary" && l["operation"] == "query" && strings.Contains(l["query"], "podcasts") {
 			found = true
-			// The query template must contain the placeholder, not the
-			// literal bound value "some-id".
-			assert.Contains(t, l["query"], "?")
+			// The query template must contain a placeholder (postgres
+			// renders "$1", not "?"), not the literal bound value
+			// "some-id".
+			assert.Contains(t, l["query"], "$1")
 			assert.NotContains(t, l["query"], "some-id")
 		}
 	}
 	assert.True(t, found, "expected a query-duration series for a podcasts query, got labels: %v", labels)
 }
 
-// TestInitDB_ConcurrentWriters verifies that raising maxOpenConns above 1
-// lets multiple goroutines write concurrently without "database is locked"
-// errors, confirming the DSN pragmas (WAL + busy_timeout) really do apply
-// to every pooled connection and not just the first one opened.
+// TestInitDB_ConcurrentWriters verifies that concurrent writers can all
+// succeed against the same DB without error - exercising the connection
+// pool under real concurrency, unlike SQLite's single-physical-writer
+// model this replaced.
 func TestInitDB_ConcurrentWriters(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := InitDB(dbPath, 4)
-	require.NoError(t, err)
+	db := openTestDB(t)
 
 	sqlDB, err := db.DB()
 	require.NoError(t, err)

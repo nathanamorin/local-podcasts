@@ -2,6 +2,8 @@ package podcast
 
 import (
 	"encoding/json"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -112,6 +114,52 @@ func TestClaimJob_RequeuesStuckJob(t *testing.T) {
 	require.NotNil(t, job2)
 	assert.Equal(t, job.ID, job2.ID)
 	assert.Equal(t, "worker-2", job2.ClaimedBy)
+}
+
+// TestClaimJob_ConcurrentWorkersNeverDoubleClaim exercises ClaimJob under
+// real concurrent PostgreSQL transactions (many goroutines sharing one
+// connection pool, each racing to claim from the same pending-job backlog).
+// This is the scenario SQLite could only make "safe" by serializing every
+// writer - under Postgres MVCC, a plain SELECT-then-UPDATE would let two
+// transactions read the same pending row before either commits, double-
+// claiming it. ClaimJob's FOR UPDATE SKIP LOCKED (see job.go) is what
+// prevents that; this test would fail intermittently without it.
+func TestClaimJob_ConcurrentWorkersNeverDoubleClaim(t *testing.T) {
+	db := openTestDB(t)
+
+	const jobs = 40
+	for i := 0; i < jobs; i++ {
+		require.NoError(t, EnqueueDownloadJob(db, "pod1", fmt.Sprintf("ep%d", i)))
+	}
+
+	const workers = 8
+	var wg sync.WaitGroup
+	claimedIDs := make(chan string, jobs*2)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for {
+				job, err := ClaimJob(db, []JobType{JobTypeDownload}, fmt.Sprintf("worker-%d", workerID))
+				assert.NoError(t, err)
+				if job == nil {
+					return
+				}
+				claimedIDs <- job.ID
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(claimedIDs)
+
+	seen := make(map[string]int)
+	for id := range claimedIDs {
+		seen[id]++
+	}
+	assert.Len(t, seen, jobs, "expected every job claimed exactly once")
+	for id, count := range seen {
+		assert.Equal(t, 1, count, "job %s was claimed %d times", id, count)
+	}
 }
 
 func TestCompleteJob_DownloadSuccess_UpdatesEpisodeAndChainsFingerprintJob(t *testing.T) {

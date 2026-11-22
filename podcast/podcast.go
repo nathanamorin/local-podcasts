@@ -66,8 +66,6 @@ func ValidateAudioFile(filePath string) error {
 	return nil
 }
 
-
-
 type Episode struct {
 	PodcastID        string `json:"-" gorm:"primaryKey"`
 	Id               string `json:"id" gorm:"primaryKey"`
@@ -81,10 +79,10 @@ type Episode struct {
 }
 
 type Podcast struct {
-	Id                string     `json:"id" gorm:"primaryKey"`
-	Name              string     `json:"name"`
-	Description       string     `json:"description"`
-	ImageFile         string     `json:"image_file"`
+	Id                string `json:"id" gorm:"primaryKey"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	ImageFile         string `json:"image_file"`
 	episodesMap       map[string]*Episode
 	Episodes          []*Episode `json:"episodes,omitempty" gorm:"foreignKey:PodcastID;references:Id"`
 	RSSUrl            string     `json:"rss_url"`
@@ -391,7 +389,7 @@ func parsePodcastRss(feedData string, rssUrl string) (*Podcast, error) {
 			Id:               id,
 			Description:      item.Description,
 			AudioFile:        audio.URL,
-				RSSAudioURL:      audio.URL,
+			RSSAudioURL:      audio.URL,
 			ReadOrder:        i,
 			PublishTimestamp: publishedTime.Unix(),
 			Length:           audioLength,
@@ -441,22 +439,18 @@ func (p *Podcast) GetAudioFile(config Config, episodeId string) (string, error) 
 }
 
 // GetEpisodeAudioFilePath resolves an episode's on-disk audio path via a
-// single-row query against readDB (the read-only connection pool), instead
-// of going through PodcastWatcher.GetPodcast (which Preloads every episode
-// of the podcast through the single-connection writer pool). It's used on
-// the hot path serving episode streams to worker fingerprinting requests -
-// at high worker concurrency, routing this through the writer pool put it
-// in direct contention with every concurrent ClaimJob/CompleteJob call and
-// could queue for minutes; readDB's pooled connections never block on (or
-// get blocked by) the writer in WAL mode.
-func GetEpisodeAudioFilePath(readDB *gorm.DB, config Config, podcastID, episodeID string) (string, error) {
+// single-row query, instead of going through PodcastWatcher.GetPodcast
+// (which Preloads every episode of the podcast). It's used on the hot path
+// serving episode streams to worker fingerprinting requests, where
+// Preloading an entire podcast's episode list for a one-row lookup would be
+// needlessly wasteful under high worker concurrency.
+func GetEpisodeAudioFilePath(db *gorm.DB, config Config, podcastID, episodeID string) (string, error) {
 	var episode Episode
-	if err := readDB.Where("podcast_id = ? AND id = ?", podcastID, episodeID).First(&episode).Error; err != nil {
+	if err := db.Where("podcast_id = ? AND id = ?", podcastID, episodeID).First(&episode).Error; err != nil {
 		return "", fmt.Errorf("episode id (%s) not found: %w", episodeID, err)
 	}
 	return filepath.Join(config.FileHome, podcastID, episode.AudioFile), nil
 }
-
 
 // EpisodeByID returns the episode with the given ID (populated via
 // fillEpisodeMap, e.g. by GetPodcast), and whether it was found. Used by the
@@ -799,8 +793,24 @@ func (p *Podcast) SavePodcastMetadata(config Config, db *gorm.DB) error {
 		ep.PodcastID = p.Id
 	}
 
-	result := db.Session(&gorm.Session{FullSaveAssociations: true}).Save(p)
-	return result.Error
+	// Explicitly save the Podcast row before its Episodes, in their own
+	// statements inside one transaction, rather than relying on GORM's
+	// FullSaveAssociations to order this automatically: when Save() takes
+	// the update path (p.Id already set, as it always is here), GORM saves
+	// hasMany associations *before* updating the main record - under
+	// SQLite this went unnoticed because its foreign key enforcement is
+	// off by default, but PostgreSQL enforces the episodes->podcasts FK on
+	// every statement, so inserting/upserting an episode before its parent
+	// podcast row exists fails immediately.
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Omit("Episodes").Save(p).Error; err != nil {
+			return err
+		}
+		if len(p.Episodes) == 0 {
+			return nil
+		}
+		return tx.Save(&p.Episodes).Error
+	})
 }
 
 func (p *Podcast) fillEpisodeMap() {

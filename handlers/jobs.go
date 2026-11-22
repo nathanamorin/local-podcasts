@@ -226,7 +226,7 @@ type queueLengthResponse struct {
 // @Failure      500  {object}  map[string]string
 // @Router       /internal/jobs/queue-length [get]
 func (h *Handler) QueueLength(c echo.Context) error {
-	count, err := podcast.PendingJobCount(h.readDB)
+	count, err := podcast.PendingJobCount(h.db)
 	if err != nil {
 		klog.Errorf("error counting pending jobs: %s", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "error counting pending jobs"})

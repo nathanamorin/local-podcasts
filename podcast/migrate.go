@@ -14,7 +14,7 @@ import (
 const podcastInfoFilename = "info.json"
 
 // MigrateFromFiles reads legacy info.json files from the data directory and
-// imports them into SQLite. It is a no-op if the podcasts table already has rows.
+// imports them into the database. It is a no-op if the podcasts table already has rows.
 func MigrateFromFiles(config Config, db *gorm.DB) error {
 	var count int64
 	if err := db.Model(&Podcast{}).Count(&count).Error; err != nil {
@@ -59,9 +59,22 @@ func MigrateFromFiles(config Config, db *gorm.DB) error {
 			ep.PodcastID = p.Id
 		}
 
-		result := db.Session(&gorm.Session{FullSaveAssociations: true}).Save(&p)
-		if result.Error != nil {
-			klog.Errorf("migration: error saving podcast %s: %s", p.Name, result.Error)
+		// Save the Podcast row before its Episodes in their own statements
+		// (see SavePodcastMetadata's comment for why this must be explicit
+		// rather than relying on GORM's FullSaveAssociations ordering -
+		// PostgreSQL enforces the episodes->podcasts FK on every
+		// statement).
+		err = db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Omit("Episodes").Save(&p).Error; err != nil {
+				return err
+			}
+			if len(p.Episodes) == 0 {
+				return nil
+			}
+			return tx.Save(&p.Episodes).Error
+		})
+		if err != nil {
+			klog.Errorf("migration: error saving podcast %s: %s", p.Name, err)
 			continue
 		}
 

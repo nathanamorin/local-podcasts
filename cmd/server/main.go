@@ -20,12 +20,11 @@ import (
 var build = "develop"
 
 type appConfig struct {
-	FileHome           string `conf:"default:/data,help:directory for podcast audio files and images"`
-	DBPath             string `conf:"help:path to the SQLite database file (defaults to <file-home>/podcasts.db)"`
-	Addr               string `conf:"default::8080,help:listen address for the public HTTP server"`
-	InternalAddr       string `conf:"default::8081,help:listen address for the internal worker job API"`
-	ReadDBMaxOpenConns  int `conf:"default:4,help:max concurrent connections for the read-only DB pool used by /metrics (see podcast.InitReadOnlyDB)"`
-	WriteDBMaxOpenConns int `conf:"default:4,help:max concurrent connections for the writer DB pool used by job claim/complete and all other mutations (see podcast.InitDB); SQLite still only allows one writer to commit at a time, so this trades Go-level queueing for SQLite-level lock queueing under worker concurrency"`
+	FileHome       string `conf:"default:/data,help:directory for podcast audio files and images"`
+	DBDSN          string `conf:"help:PostgreSQL connection string, e.g. postgres://user:password@host:5432/dbname?sslmode=disable (required)"`
+	Addr           string `conf:"default::8080,help:listen address for the public HTTP server"`
+	InternalAddr   string `conf:"default::8081,help:listen address for the internal worker job API"`
+	DBMaxOpenConns int    `conf:"default:20,help:max concurrent connections in the Postgres connection pool (see podcast.InitDB)"`
 }
 
 // @title           local-podcasts API
@@ -46,13 +45,12 @@ func main() {
 		log.Fatalf("parsing config: %s", err)
 	}
 
-	// Default DB path to <file-home>/podcasts.db if not explicitly set.
-	if cfg.DBPath == "" {
-		cfg.DBPath = filepath.Join(cfg.FileHome, "podcasts.db")
+	if cfg.DBDSN == "" {
+		log.Fatalf("LOCAL_PODCASTS_DB_DSN is required (PostgreSQL connection string)")
 	}
 
-	klog.Infof("starting local-podcasts build[%s] file-home[%s] db[%s] addr[%s] internal-addr[%s]",
-		build, cfg.FileHome, cfg.DBPath, cfg.Addr, cfg.InternalAddr)
+	klog.Infof("starting local-podcasts build[%s] file-home[%s] addr[%s] internal-addr[%s]",
+		build, cfg.FileHome, cfg.Addr, cfg.InternalAddr)
 
 	podcastConfig := podcast.Config{FileHome: cfg.FileHome}
 
@@ -67,14 +65,9 @@ func main() {
 		}
 	}
 
-	db, err := podcast.InitDB(cfg.DBPath, cfg.WriteDBMaxOpenConns)
+	db, err := podcast.InitDB(cfg.DBDSN, cfg.DBMaxOpenConns)
 	if err != nil {
 		klog.Fatalf("error initializing database: %s", err)
-	}
-
-	readDB, err := podcast.InitReadOnlyDB(cfg.DBPath, db, cfg.ReadDBMaxOpenConns)
-	if err != nil {
-		klog.Fatalf("error initializing read-only database: %s", err)
 	}
 
 	if err := podcast.MigrateFromFiles(podcastConfig, db); err != nil {
@@ -88,7 +81,7 @@ func main() {
 
 	e := echo.New()
 
-	h := handlers.New(podcastConfig, &pw, db, readDB)
+	h := handlers.New(podcastConfig, &pw, db)
 	h.Register(e)
 
 	// The internal worker job API is served on a separate port/listener so
@@ -121,4 +114,3 @@ func main() {
 		log.Fatal(err)
 	}
 }
-

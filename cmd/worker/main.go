@@ -8,9 +8,9 @@
 // main app pod). All audio bytes move over plain HTTP: downloads are
 // fetched from the source and then uploaded to the main app, and
 // fingerprinting re-fetches the already-downloaded episode from the main
-// app's public streaming endpoint. This keeps SQLite access
-// single-process/single-writer and lets worker pods scale/schedule freely
-// with zero storage coupling, regardless of worker replica count.
+// app's public streaming endpoint. This keeps database access
+// single-process and lets worker pods scale/schedule freely with zero
+// storage coupling, regardless of worker replica count.
 package main
 
 import (

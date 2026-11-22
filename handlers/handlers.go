@@ -37,11 +37,10 @@ type Handler struct {
 	config podcast.Config
 	pw     *podcast.PodcastWatcher
 	db     *gorm.DB
-	readDB *gorm.DB
 }
 
-func New(config podcast.Config, pw *podcast.PodcastWatcher, db *gorm.DB, readDB *gorm.DB) *Handler {
-	return &Handler{config: config, pw: pw, db: db, readDB: readDB}
+func New(config podcast.Config, pw *podcast.PodcastWatcher, db *gorm.DB) *Handler {
+	return &Handler{config: config, pw: pw, db: db}
 }
 
 // Register attaches all public-facing routes to the given Echo instance.
@@ -228,9 +227,10 @@ func (h *Handler) StreamEpisode(c echo.Context) error {
 	podcastID := c.Param("podcast_id")
 	episodeID := c.Param("episode_id")
 
-	// Resolved via the pooled readDB (not h.pw.GetPodcast / the single-
-	// connection writer) - see podcast.GetEpisodeAudioFilePath.
-	filePath, err := podcast.GetEpisodeAudioFilePath(h.readDB, h.config, podcastID, episodeID)
+	// Resolved via a lean single-row query (not h.pw.GetPodcast, which
+	// would Preload every episode for the podcast) - see
+	// podcast.GetEpisodeAudioFilePath.
+	filePath, err := podcast.GetEpisodeAudioFilePath(h.db, h.config, podcastID, episodeID)
 	if err != nil {
 		klog.Errorf("error getting audio file for episode %s/%s: %s", podcastID, episodeID, err)
 		return c.String(http.StatusInternalServerError, `{"error": "error getting stream"}`)

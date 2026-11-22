@@ -9,6 +9,28 @@ services:
       - .:/app
       - .data:/data
       - go-pkg-cache:/go/pkg
+    environment:
+      - LOCAL_PODCASTS_DB_DSN=postgres://postgres:postgres@postgres:5432/local_podcasts?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=local_podcasts
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
   frontend:
@@ -27,3 +49,4 @@ services:
 volumes:
   go-pkg-cache:
   frontend-node-modules:
+  postgres-data:
