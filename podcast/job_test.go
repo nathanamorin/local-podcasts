@@ -96,6 +96,13 @@ func TestClaimJob_RequeuesStuckJob(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, job)
 
+	// requeueStuckJobs is throttled (see requeueStuckJobsInterval) and its
+	// last-run time is process-global, so force it to run again on the next
+	// ClaimJob call below regardless of what other tests ran recently.
+	requeueStuckJobsMu.Lock()
+	requeueStuckJobsLastRun = time.Time{}
+	requeueStuckJobsMu.Unlock()
+
 	// Simulate a worker that claimed the job long ago and crashed.
 	staleTime := time.Now().Add(-2 * jobLeaseTimeout)
 	require.NoError(t, db.Model(&Job{}).Where("id = ?", job.ID).Update("claimed_at", staleTime).Error)

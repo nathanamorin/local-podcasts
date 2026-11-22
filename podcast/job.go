@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -47,16 +48,23 @@ const jobMaxAttempts = 5
 // fingerprints for an already-downloaded episode) claimed and completed by
 // worker pods via the internal HTTP API.
 type Job struct {
-	ID        string     `json:"id" gorm:"primaryKey"`
-	Type      JobType    `json:"type" gorm:"index"`
+	ID   string  `json:"id" gorm:"primaryKey"`
+	Type JobType `json:"type" gorm:"index"`
+	// status,created_at is a composite index backing ClaimJob's
+	// "WHERE status = pending ORDER BY created_at LIMIT 1" query. Without
+	// it, that ORDER BY requires sorting every matching row from scratch on
+	// every single claim call - with a backlog of tens of thousands of
+	// pending jobs and dozens of worker pods polling every few seconds on a
+	// single serialized writer connection, that made claims queue up
+	// severely enough that almost no jobs got processed.
 	PodcastID string     `json:"podcast_id"`
 	EpisodeID string     `json:"episode_id"`
-	Status    JobStatus  `json:"status" gorm:"index"`
+	Status    JobStatus  `json:"status" gorm:"index:idx_job_status_created,priority:1"`
 	Attempts  int        `json:"attempts"`
 	ClaimedBy string     `json:"claimed_by,omitempty"`
 	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
 	Error     string     `json:"error,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
+	CreatedAt time.Time  `json:"created_at" gorm:"index:idx_job_status_created,priority:2"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
@@ -197,10 +205,33 @@ func GetJob(db *gorm.DB, jobID string) (*Job, error) {
 	return &job, nil
 }
 
+// requeueStuckJobsInterval bounds how often ClaimJob actually runs the
+// requeue-stuck-jobs scan. jobLeaseTimeout is 30 minutes, so there's no need
+// for sub-second precision; running it on every single claim call needlessly
+// adds an extra write-transaction (competing with every other
+// claim/complete across potentially dozens of worker pods) on top of the
+// claim itself, which under a large backlog measurably starved real claim
+// throughput.
+const requeueStuckJobsInterval = 30 * time.Second
+
+var (
+	requeueStuckJobsMu      sync.Mutex
+	requeueStuckJobsLastRun time.Time
+)
+
 // requeueStuckJobs resets any job that's been claimed longer than
 // jobLeaseTimeout back to pending, so a crashed/evicted worker doesn't strand
-// its job forever.
+// its job forever. Throttled to at most once per requeueStuckJobsInterval
+// (see its doc comment) regardless of how often it's called.
 func requeueStuckJobs(db *gorm.DB) error {
+	requeueStuckJobsMu.Lock()
+	if time.Since(requeueStuckJobsLastRun) < requeueStuckJobsInterval {
+		requeueStuckJobsMu.Unlock()
+		return nil
+	}
+	requeueStuckJobsLastRun = time.Now()
+	requeueStuckJobsMu.Unlock()
+
 	cutoff := time.Now().Add(-jobLeaseTimeout)
 	return db.Model(&Job{}).
 		Where("status = ? AND claimed_at < ?", JobStatusProcessing, cutoff).
