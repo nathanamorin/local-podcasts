@@ -70,10 +70,14 @@ func main() {
 // upsert copies every row of model T from src to dst in batches, in-place
 // overwriting any existing row with the same primary key (ON CONFLICT DO
 // UPDATE) so the tool is safely re-runnable if it's interrupted partway
-// through.
-func upsert[T any](src, dst *gorm.DB, label string) error {
+// through. orderBy must reference column(s) that uniquely and stably order
+// every row (e.g. the primary key) - FindInBatches pages through the source
+// with repeated LIMIT/OFFSET queries, and without a deterministic ORDER BY,
+// SQLite doesn't guarantee the same row order across those queries, which
+// can silently skip or duplicate rows near batch boundaries.
+func upsert[T any](src, dst *gorm.DB, label, orderBy string) error {
 	var total int64
-	err := src.Session(&gorm.Session{}).Model(new(T)).FindInBatches(&[]T{}, batchSize, func(tx *gorm.DB, batchNum int) error {
+	err := src.Session(&gorm.Session{}).Model(new(T)).Order(orderBy).FindInBatches(&[]T{}, batchSize, func(tx *gorm.DB, batchNum int) error {
 		rows, ok := tx.Statement.Dest.(*[]T)
 		if !ok || len(*rows) == 0 {
 			return nil
@@ -93,19 +97,19 @@ func upsert[T any](src, dst *gorm.DB, label string) error {
 }
 
 func copyPodcasts(src, dst *gorm.DB) error {
-	return upsert[podcast.Podcast](src, dst, "podcasts")
+	return upsert[podcast.Podcast](src, dst, "podcasts", "id")
 }
 
 func copyEpisodes(src, dst *gorm.DB) error {
-	return upsert[podcast.Episode](src, dst, "episodes")
+	return upsert[podcast.Episode](src, dst, "episodes", "podcast_id, id")
 }
 
 func copyJobs(src, dst *gorm.DB) error {
-	return upsert[podcast.Job](src, dst, "jobs")
+	return upsert[podcast.Job](src, dst, "jobs", "id")
 }
 
 func copyFingerprints(src, dst *gorm.DB) error {
-	if err := upsert[podcast.EpisodeFingerprint](src, dst, "episode_fingerprints"); err != nil {
+	if err := upsert[podcast.EpisodeFingerprint](src, dst, "episode_fingerprints", "id"); err != nil {
 		return err
 	}
 	// Explicit IDs were preserved during the copy, so Postgres' auto-
