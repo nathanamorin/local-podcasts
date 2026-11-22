@@ -73,3 +73,26 @@ var DoneJobsGauge = promauto.NewGaugeVec(
 	},
 	[]string{"type"},
 )
+
+// QueryDuration tracks how long each database operation takes, split by
+// which connection pool served it ("write" - the single serialized
+// SetMaxOpenConns(1) connection used for all mutations and most reads, or
+// "read" - the pooled, query_only InitReadOnlyDB connections), by GORM
+// operation type (create/query/update/delete/row/raw), and by the
+// parameterized SQL query template it ran (e.g. "SELECT * FROM `episodes`
+// WHERE `podcast_id` = ? AND `id` = ?" - the placeholder form built by
+// GORM, never substituted with actual bound values, to avoid unbounded
+// label cardinality from parameter data). This is what would have
+// surfaced the writer-connection contention bug (episode-stream lookups
+// queueing for minutes behind job-claim traffic) directly as a latency
+// metric, instead of requiring manual wget/dd diagnosis.
+var QueryDuration = promauto.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name: "local_podcasts_db_query_duration_seconds",
+		Help: "Duration of database operations, by connection pool (write/read), GORM operation type, and parameterized query template (no bound parameter values).",
+		// Wide range: normal queries complete in well under a millisecond,
+		// but the bug this is meant to catch stalled for minutes.
+		Buckets: prometheus.ExponentialBuckets(0.0001, 4, 14), // ~0.1ms .. ~7 minutes
+	},
+	[]string{"db", "operation", "query"},
+)

@@ -3,8 +3,10 @@ package podcast
 import (
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/nathanamorin/local-podcasts/metrics"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"k8s.io/klog/v2"
@@ -93,7 +95,70 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		return nil, err
 	}
 
+	if isFileBacked {
+		registerQueryDurationCallbacks(db, "write")
+	}
+
 	return db, nil
+}
+
+// queryStartSetting is the key used to pass the operation's start time from
+// a callback's "before" hook to its "after" hook via Statement.Settings
+// (a sync.Map scoped to a single GORM operation, cleared for the next one).
+const queryStartSetting = "metrics:query_start"
+
+// registerQueryDurationCallbacks instruments every GORM operation type
+// (create/query/update/delete/row/raw) on gdb to observe its duration into
+// metrics.QueryDuration, labeled with dbLabel ("write" or "read") and the
+// parameterized SQL query template (placeholders only, no bound values -
+// read from Statement.SQL, which GORM builds separately from
+// Statement.Vars). This exists specifically so that connection-pool
+// contention - like the StreamEpisode/writer-connection bug fixed earlier,
+// where an operation queued for minutes behind other writer traffic -
+// shows up directly as a latency metric instead of requiring manual
+// wget/dd-based diagnosis.
+func registerQueryDurationCallbacks(gdb *gorm.DB, dbLabel string) {
+	before := func(tx *gorm.DB) {
+		tx.Statement.Settings.Store(queryStartSetting, time.Now())
+	}
+	after := func(operation string) func(tx *gorm.DB) {
+		return func(tx *gorm.DB) {
+			v, ok := tx.Statement.Settings.Load(queryStartSetting)
+			if !ok {
+				return
+			}
+			start, ok := v.(time.Time)
+			if !ok {
+				return
+			}
+			query := tx.Statement.SQL.String()
+			if query == "" {
+				query = "unknown"
+			}
+			metrics.QueryDuration.WithLabelValues(dbLabel, operation, query).Observe(time.Since(start).Seconds())
+		}
+	}
+
+	// Each operation is registered explicitly (rather than in a loop) since
+	// the processor/callback types returned by Callback().Create() etc. are
+	// unexported, so they can't be stored generically across operation types.
+	_ = gdb.Callback().Create().Before("gorm:create").Register("metrics:before_create", before)
+	_ = gdb.Callback().Create().After("gorm:create").Register("metrics:after_create", after("create"))
+
+	_ = gdb.Callback().Query().Before("gorm:query").Register("metrics:before_query", before)
+	_ = gdb.Callback().Query().After("gorm:query").Register("metrics:after_query", after("query"))
+
+	_ = gdb.Callback().Update().Before("gorm:update").Register("metrics:before_update", before)
+	_ = gdb.Callback().Update().After("gorm:update").Register("metrics:after_update", after("update"))
+
+	_ = gdb.Callback().Delete().Before("gorm:delete").Register("metrics:before_delete", before)
+	_ = gdb.Callback().Delete().After("gorm:delete").Register("metrics:after_delete", after("delete"))
+
+	_ = gdb.Callback().Row().Before("gorm:row").Register("metrics:before_row", before)
+	_ = gdb.Callback().Row().After("gorm:row").Register("metrics:after_row", after("row"))
+
+	_ = gdb.Callback().Raw().Before("gorm:raw").Register("metrics:before_raw", before)
+	_ = gdb.Callback().Raw().After("gorm:raw").Register("metrics:after_raw", after("raw"))
 }
 
 // InitReadOnlyDB opens a second connection pool against the same database,
@@ -138,6 +203,8 @@ func InitReadOnlyDB(dbPath string, writeDB *gorm.DB, maxOpenConns int) (*gorm.DB
 	}
 	sqlDB.SetMaxOpenConns(maxOpenConns)
 	sqlDB.SetMaxIdleConns(maxOpenConns)
+
+	registerQueryDurationCallbacks(db, "read")
 
 	return db, nil
 }
