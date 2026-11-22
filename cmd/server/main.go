@@ -21,7 +21,11 @@ var build = "develop"
 
 type appConfig struct {
 	FileHome       string `conf:"default:/data,help:directory for podcast audio files and images"`
-	DBDSN          string `conf:"help:PostgreSQL connection string, e.g. postgres://user:password@host:5432/dbname?sslmode=disable (required)"`
+	// Explicit env name: conf's default camelCase->SCREAMING_SNAKE_CASE
+	// derivation doesn't split consecutive capitals, so "DBDSN" would
+	// otherwise become LOCAL_PODCASTS_DBDSN rather than the documented/
+	// expected LOCAL_PODCASTS_DB_DSN.
+	DBDSN          string `conf:"env:DB_DSN,help:PostgreSQL connection string, e.g. postgres://user:password@host:5432/dbname?sslmode=disable (required)"`
 	Addr           string `conf:"default::8080,help:listen address for the public HTTP server"`
 	InternalAddr   string `conf:"default::8081,help:listen address for the internal worker job API"`
 	DBMaxOpenConns int    `conf:"default:20,help:max concurrent connections in the Postgres connection pool (see podcast.InitDB)"`

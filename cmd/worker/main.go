@@ -36,8 +36,12 @@ import (
 var build = "develop"
 
 type workerConfig struct {
-	InternalAPIURL string        `conf:"default:http://local-podcasts-internal.local-podcasts.svc.cluster.local:8081,help:base URL of the main app's internal job API (claim/complete/upload)"`
-	PublicAPIURL   string        `conf:"default:http://local-podcasts.local-podcasts.svc.cluster.local:8080,help:base URL of the main app's public API (used to stream audio for fingerprinting)"`
+	// Explicit env names: conf's camelCase->SCREAMING_SNAKE_CASE derivation
+	// doesn't split consecutive capitals, so "...APIURL" would otherwise
+	// become LOCAL_PODCASTS_WORKER_..._APIURL rather than the documented/
+	// expected LOCAL_PODCASTS_WORKER_..._API_URL.
+	InternalAPIURL string        `conf:"env:INTERNAL_API_URL,default:http://local-podcasts-internal.local-podcasts.svc.cluster.local:8081,help:base URL of the main app's internal job API (claim/complete/upload)"`
+	PublicAPIURL   string        `conf:"env:PUBLIC_API_URL,default:http://local-podcasts.local-podcasts.svc.cluster.local:8080,help:base URL of the main app's public API (used to stream audio for fingerprinting)"`
 	PollInterval   time.Duration `conf:"default:3s,help:how often to poll for a new job when idle"`
 	Concurrency    int           `conf:"default:2,help:number of jobs this pod processes concurrently"`
 	JobTypes       string        `conf:"default:download;fingerprint,help:semicolon-separated job types this worker pod accepts (split on comma or semicolon)"`
