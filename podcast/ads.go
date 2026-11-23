@@ -84,7 +84,69 @@ func FindAdCandidates(db *gorm.DB, episodeID string) ([]AdCandidate, error) {
 			EndBSec:    s.EndBSec,
 		})
 	}
+
+	if episodeID != "" {
+		candidates = mergeCandidateRangesForEpisode(candidates, episodeID)
+	}
 	return candidates, nil
+}
+
+// mergeCandidateRangesForEpisode collapses episodeID's own ad ranges
+// (across all candidates involving it, regardless of which other episode
+// each was matched against) into merged skip ranges: two consecutive
+// ranges are joined into one when the non-ad gap between them is <= the
+// length of the longer of the two, so a short stretch of real programming
+// sandwiched between two ads gets skipped along with them too.
+//
+// Every returned AdCandidate is normalized so EpisodeAID/StartASec/EndASec
+// always describe episodeID's own side of the match (the player only ever
+// reads whichever side matches the current episode - see
+// handlers.ListAdCandidates/PlayerBar.js) - B-side fields reflect the last
+// contributing match and are informational only once merged.
+func mergeCandidateRangesForEpisode(candidates []AdCandidate, episodeID string) []AdCandidate {
+	if len(candidates) == 0 {
+		return candidates
+	}
+
+	normalized := make([]AdCandidate, len(candidates))
+	for i, c := range candidates {
+		if c.EpisodeAID == episodeID {
+			normalized[i] = c
+			continue
+		}
+		// episodeID was matched on the B side - swap so A always refers
+		// to episodeID.
+		normalized[i] = AdCandidate{
+			PodcastAID: c.PodcastBID,
+			EpisodeAID: c.EpisodeBID,
+			StartASec:  c.StartBSec,
+			EndASec:    c.EndBSec,
+			PodcastBID: c.PodcastAID,
+			EpisodeBID: c.EpisodeAID,
+			StartBSec:  c.StartASec,
+			EndBSec:    c.EndASec,
+		}
+	}
+	sort.Slice(normalized, func(i, j int) bool { return normalized[i].StartASec < normalized[j].StartASec })
+
+	merged := []AdCandidate{normalized[0]}
+	for _, cur := range normalized[1:] {
+		last := &merged[len(merged)-1]
+		gap := cur.StartASec - last.EndASec
+		maxLen := math.Max(last.EndASec-last.StartASec, cur.EndASec-cur.StartASec)
+		if gap <= maxLen {
+			if cur.EndASec > last.EndASec {
+				last.EndASec = cur.EndASec
+				last.PodcastBID = cur.PodcastBID
+				last.EpisodeBID = cur.EpisodeBID
+				last.StartBSec = cur.StartBSec
+				last.EndBSec = cur.EndBSec
+			}
+		} else {
+			merged = append(merged, cur)
+		}
+	}
+	return merged
 }
 
 // detectAdsForEpisode compares one episode's fingerprints against every

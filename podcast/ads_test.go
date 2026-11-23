@@ -98,6 +98,32 @@ func TestDetectAdsForEpisode_ReplacesStaleSegmentsOnRerun(t *testing.T) {
 	assert.Empty(t, candidates)
 }
 
+func TestFindAdCandidates_MergesCloseGapsOnQueriedEpisodeSide(t *testing.T) {
+	db := openTestDB(t)
+
+	// epA has two detected ad segments against two different partner
+	// episodes. The gap between them (100 -> 105 = 5s) is <= the length
+	// of the longer adjacent ad (10s), so they should be merged into one
+	// skip range from episodeID's perspective.
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epB", StartASec: 90, EndASec: 100, StartBSec: 10, EndBSec: 20}).Error)
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epC", EpisodeBID: "epA", StartASec: 40, EndASec: 60, StartBSec: 105, EndBSec: 125}).Error)
+	// A third, far-away segment (gap 500s, much larger than either ad)
+	// must remain separate.
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epD", StartASec: 625, EndASec: 635, StartBSec: 1, EndBSec: 11}).Error)
+
+	candidates, err := FindAdCandidates(db, "epA")
+	require.NoError(t, err)
+	require.Len(t, candidates, 2)
+
+	assert.Equal(t, "epA", candidates[0].EpisodeAID)
+	assert.Equal(t, 90.0, candidates[0].StartASec)
+	assert.Equal(t, 125.0, candidates[0].EndASec)
+
+	assert.Equal(t, "epA", candidates[1].EpisodeAID)
+	assert.Equal(t, 625.0, candidates[1].StartASec)
+	assert.Equal(t, 635.0, candidates[1].EndASec)
+}
+
 func TestFindAdCandidates_FiltersByEpisodeID(t *testing.T) {
 	db := openTestDB(t)
 	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epB", StartASec: 1, EndASec: 2, StartBSec: 3, EndBSec: 4}).Error)
@@ -106,7 +132,10 @@ func TestFindAdCandidates_FiltersByEpisodeID(t *testing.T) {
 	candidates, err := FindAdCandidates(db, "epB")
 	require.NoError(t, err)
 	require.Len(t, candidates, 1)
-	assert.Equal(t, "epA", candidates[0].EpisodeAID)
+	// Filtered results are normalized so EpisodeAID always refers to the
+	// queried episode, regardless of which side it originally matched on.
+	assert.Equal(t, "epB", candidates[0].EpisodeAID)
+	assert.Equal(t, "epA", candidates[0].EpisodeBID)
 
 	all, err := FindAdCandidates(db, "")
 	require.NoError(t, err)
