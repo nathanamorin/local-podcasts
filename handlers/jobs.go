@@ -182,30 +182,40 @@ func (h *Handler) UploadJobAudio(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": msg})
 	}
 
-	file, err := os.Create(destPath)
+	// Write to a scratch file in the same directory first, then rename into
+	// place only once the upload is fully written and validated. Renaming
+	// within the same filesystem is atomic, so StreamEpisode never observes
+	// a truncated/empty file mid-upload - os.Create'ing destPath directly
+	// would truncate any existing (good) file immediately and leave readers
+	// seeing a partial file for the whole duration of the upload.
+	tmpFile, err := os.CreateTemp(podcastDir, ".upload-*.tmp")
 	if err != nil {
-		return fail(fmt.Sprintf("create %s: %s", destPath, err))
+		return fail(fmt.Sprintf("create scratch file in %s: %s", podcastDir, err))
 	}
-	n, err := file.ReadFrom(c.Request().Body)
-	file.Close()
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath) // no-op once renamed away on success
+
+	n, err := tmpFile.ReadFrom(c.Request().Body)
+	tmpFile.Close()
 	if err != nil {
-		os.Remove(destPath)
-		return fail(fmt.Sprintf("write %s: %s", destPath, err))
+		return fail(fmt.Sprintf("write %s: %s", tmpPath, err))
 	}
 	if n == 0 {
-		os.Remove(destPath)
 		return fail("uploaded 0 bytes")
 	}
 
-	if err := podcast.ValidateAudioFile(destPath); err != nil {
-		os.Remove(destPath)
+	if err := podcast.ValidateAudioFile(tmpPath); err != nil {
 		return fail(fmt.Sprintf("audio validation failed: %s", err))
 	}
 
-	length, err := podcast.GetAudioLength(destPath)
+	length, err := podcast.GetAudioLength(tmpPath)
 	if err != nil {
-		klog.Warningf("job %s: could not determine audio length of %s: %s", jobID, destPath, err)
+		klog.Warningf("job %s: could not determine audio length of %s: %s", jobID, tmpPath, err)
 		length = 0
+	}
+
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return fail(fmt.Sprintf("rename %s to %s: %s", tmpPath, destPath, err))
 	}
 
 	result, err := json.Marshal(podcast.DownloadJobResult{LocalFilename: filename, LengthSeconds: length})

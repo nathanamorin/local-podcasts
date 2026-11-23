@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -212,6 +213,33 @@ func (h *Handler) GetPodcastImage(c echo.Context) error {
 	return nil
 }
 
+// streamRetryAfterSec is suggested to clients as how long to wait before
+// retrying a 503 from StreamEpisode - long enough for a requeued download
+// job to typically be picked up and completed, short enough that the
+// client doesn't feel stuck.
+const streamRetryAfterSec = 15
+
+// streamUnavailableResponse is returned (as a 503) when StreamEpisode can't
+// serve the file immediately. Retrying is true when a re-download was
+// successfully queued (the client should retry shortly); false means the
+// requeue itself failed, so retrying right away is unlikely to help.
+type streamUnavailableResponse struct {
+	Error    string `json:"error"`
+	Retrying bool   `json:"retrying"`
+}
+
+func (h *Handler) streamUnavailable(c echo.Context, podcastID, episodeID, reason string) error {
+	retrying := h.requeueWithWarn(podcastID, episodeID)
+
+	msg := fmt.Sprintf("%s; a re-download has been queued, retry in a few seconds", reason)
+	if !retrying {
+		msg = fmt.Sprintf("%s; re-download could not be queued, try again later", reason)
+	}
+
+	c.Response().Header().Set("Retry-After", strconv.Itoa(streamRetryAfterSec))
+	return c.JSON(http.StatusServiceUnavailable, streamUnavailableResponse{Error: msg, Retrying: retrying})
+}
+
 // StreamEpisode godoc
 // @Summary      Stream an episode's audio
 // @Description  Streams the downloaded audio file for a podcast episode, requeuing a redownload if the file is missing or invalid.
@@ -221,7 +249,7 @@ func (h *Handler) GetPodcastImage(c echo.Context) error {
 // @Param        episode_id  path  string  true  "Episode ID"
 // @Success      200
 // @Failure      500  {object}  map[string]string
-// @Failure      503  {object}  map[string]string
+// @Failure      503  {object}  streamUnavailableResponse
 // @Router       /podcasts/{podcast_id}/episodes/{episode_id}/stream [get]
 func (h *Handler) StreamEpisode(c echo.Context) error {
 	podcastID := c.Param("podcast_id")
@@ -241,16 +269,14 @@ func (h *Handler) StreamEpisode(c echo.Context) error {
 	if err != nil || info.Size() == 0 {
 		klog.Warningf("audio file missing or empty for episode %s/%s (%s), requeuing for download",
 			podcastID, episodeID, filePath)
-		h.requeueWithWarn(podcastID, episodeID)
-		return c.String(http.StatusServiceUnavailable, `{"error": "episode not yet downloaded, queued for re-download"}`)
+		return h.streamUnavailable(c, podcastID, episodeID, "episode audio not downloaded yet")
 	}
 
 	if err := podcast.ValidateAudioFile(filePath); err != nil {
 		klog.Warningf("audio file invalid for episode %s/%s (%s): %s — requeuing for download",
 			podcastID, episodeID, filePath, err)
 		os.Remove(filePath)
-		h.requeueWithWarn(podcastID, episodeID)
-		return c.String(http.StatusServiceUnavailable, `{"error": "episode file invalid, queued for re-download"}`)
+		return h.streamUnavailable(c, podcastID, episodeID, "episode audio file was invalid")
 	}
 
 	c.Response().Status = http.StatusOK
@@ -389,8 +415,10 @@ func (h *Handler) DeleteClientStatus(c echo.Context) error {
 	return c.JSONBlob(http.StatusOK, []byte(`{"status": "success"}`))
 }
 
-func (h *Handler) requeueWithWarn(podcastID, episodeID string) {
+func (h *Handler) requeueWithWarn(podcastID, episodeID string) bool {
 	if err := h.pw.RequeueEpisodeDownload(podcastID, episodeID); err != nil {
 		klog.Errorf("requeue failed for episode %s/%s: %s", podcastID, episodeID, err)
+		return false
 	}
+	return true
 }
