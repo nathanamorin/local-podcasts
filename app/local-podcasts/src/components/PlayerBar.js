@@ -66,15 +66,16 @@ export function PlayerBar() {
   }, [currentEpisode?.id])
 
   // react-h5-audio-player doesn't expose a way to render into its own
-  // progress bar, so find the underlying DOM node (stable for the life of
-  // this component - only one <AudioPlayer> instance ever renders here)
-  // once it's mounted and portal our ad-range markers into it, positioned
-  // as a percentage of track duration exactly like the library positions
-  // its own "played" overlay.
+  // progress bar, so find the underlying DOM node once it's mounted and
+  // portal our ad-range markers into it, positioned as a percentage of
+  // track duration exactly like the library positions its own "played"
+  // overlay. <AudioPlayer> only actually mounts once an episode is
+  // selected (PlayerBar renders null before that), so this must re-run
+  // when currentEpisode changes, not just when isConnected toggles.
   useLayoutEffect(() => {
     const el = playerRef.current?.container?.current?.querySelector('.rhap_progress-bar')
     if (el) setProgressBarEl(el)
-  }, [isConnected])
+  }, [isConnected, currentEpisode?.id])
 
   function toggleAdSkip(enabled) {
     setAdSkipEnabledState(enabled)
