@@ -124,6 +124,26 @@ func TestFindAdCandidates_MergesCloseGapsOnQueriedEpisodeSide(t *testing.T) {
 	assert.Equal(t, 635.0, candidates[1].EndASec)
 }
 
+func TestFindAdCandidates_MergesTransitivelyAcrossMultiplePasses(t *testing.T) {
+	db := openTestDB(t)
+
+	// Three ad segments on epA: A(0-10, len10), B(50-55, len5), C(58-100,
+	// len42). A single left-to-right pass would merge B into C (gap 3 <=
+	// max(5,42)=42, producing BC 50-100, len50), but it would never
+	// revisit A, even though gap(A,BC) = 40 <= max(10,50) = 50 now also
+	// qualifies. Merging must therefore be run repeatedly until a full
+	// pass makes no further changes, collapsing all three into one range.
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epB", StartASec: 0, EndASec: 10, StartBSec: 1, EndBSec: 11}).Error)
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epC", StartASec: 50, EndASec: 55, StartBSec: 1, EndBSec: 6}).Error)
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epD", StartASec: 58, EndASec: 100, StartBSec: 1, EndBSec: 43}).Error)
+
+	candidates, err := FindAdCandidates(db, "epA")
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, 0.0, candidates[0].StartASec)
+	assert.Equal(t, 100.0, candidates[0].EndASec)
+}
+
 func TestFindAdCandidates_FiltersByEpisodeID(t *testing.T) {
 	db := openTestDB(t)
 	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epB", StartASec: 1, EndASec: 2, StartBSec: 3, EndBSec: 4}).Error)

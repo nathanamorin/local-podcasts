@@ -98,6 +98,13 @@ func FindAdCandidates(db *gorm.DB, episodeID string) ([]AdCandidate, error) {
 // length of the longer of the two, so a short stretch of real programming
 // sandwiched between two ads gets skipped along with them too.
 //
+// Merging a pair can grow a range enough that it now also qualifies to
+// merge with its other neighbor (e.g. a short B-C merge can grow B enough
+// that the earlier, already-finalized A-B gap now also qualifies), so a
+// single left-to-right pass isn't always enough to reach a stable result.
+// mergePass is therefore re-run until a full pass makes no further
+// changes (a fixed point) - see mergePass.
+//
 // Every returned AdCandidate is normalized so EpisodeAID/StartASec/EndASec
 // always describe episodeID's own side of the match (the player only ever
 // reads whichever side matches the current episode - see
@@ -129,12 +136,30 @@ func mergeCandidateRangesForEpisode(candidates []AdCandidate, episodeID string) 
 	}
 	sort.Slice(normalized, func(i, j int) bool { return normalized[i].StartASec < normalized[j].StartASec })
 
-	merged := []AdCandidate{normalized[0]}
-	for _, cur := range normalized[1:] {
+	merged := normalized
+	for {
+		next, changed := mergePass(merged)
+		if !changed {
+			return next
+		}
+		merged = next
+	}
+}
+
+// mergePass makes a single left-to-right scan over sorted (by StartASec)
+// ranges, joining any pair whose gap is <= the longer of the two, and
+// reports whether any merge happened. The returned slice remains sorted
+// by StartASec, so it can be fed straight back into another mergePass
+// call.
+func mergePass(sorted []AdCandidate) ([]AdCandidate, bool) {
+	merged := []AdCandidate{sorted[0]}
+	changed := false
+	for _, cur := range sorted[1:] {
 		last := &merged[len(merged)-1]
 		gap := cur.StartASec - last.EndASec
 		maxLen := math.Max(last.EndASec-last.StartASec, cur.EndASec-cur.StartASec)
 		if gap <= maxLen {
+			changed = true
 			if cur.EndASec > last.EndASec {
 				last.EndASec = cur.EndASec
 				last.PodcastBID = cur.PodcastBID
@@ -146,7 +171,7 @@ func mergeCandidateRangesForEpisode(candidates []AdCandidate, episodeID string) 
 			merged = append(merged, cur)
 		}
 	}
-	return merged
+	return merged, changed
 }
 
 // detectAdsForEpisode compares one episode's fingerprints against every
