@@ -26,20 +26,10 @@ type rescanFingerprintsResponse struct {
 // @Failure      500  {object}  map[string]string
 // @Router       /ads/candidates [get]
 func (h *Handler) ListAdCandidates(c echo.Context) error {
-	candidates, err := podcast.FindAdCandidates(h.db, 0, 0)
+	candidates, err := podcast.FindAdCandidates(h.db, c.QueryParam("episode_id"))
 	if err != nil {
 		klog.Errorf("error finding ad candidates: %s", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "error finding ad candidates"})
-	}
-
-	if episodeID := c.QueryParam("episode_id"); episodeID != "" {
-		filtered := make([]podcast.AdCandidate, 0, len(candidates))
-		for _, cand := range candidates {
-			if cand.EpisodeAID == episodeID || cand.EpisodeBID == episodeID {
-				filtered = append(filtered, cand)
-			}
-		}
-		candidates = filtered
 	}
 
 	return c.JSON(http.StatusOK, adCandidatesResponse{Candidates: candidates})

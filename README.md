@@ -80,5 +80,7 @@ Episode downloading and audio fingerprinting (used for ad detection, see below) 
   - `fingerprint` jobs: the worker re-fetches the already-downloaded episode via the public `/podcasts/{podcast_id}/episodes/{episode_id}/stream` endpoint, computes audio fingerprints locally, and reports back just the (small) resulting hashes.
   - A successful `download` job automatically enqueues the corresponding `fingerprint` job.
   - This design means worker pods are fully stateless and can be scheduled on any node and scaled to any replica count without any storage coupling.
-- Fingerprints are compared across episodes to find segments of audio shared between multiple episodes (candidate ad reads/injected ads), surfaced at `GET /ads/candidates`.
+- A successful `fingerprint` job automatically enqueues a `detect_ads` job for that episode. Unlike `download`/`fingerprint`, `detect_ads` jobs are never handed out to worker pods — they require direct, indexed database access to compare fingerprints, so they're claimed and run in-process by the main server itself (see `podcast.RunAdDetectionLoop`).
+- `detect_ads` compares the newly-fingerprinted episode's fingerprints against every other episode **of the same podcast** (ads are podcast-specific, e.g. host-read sponsor segments — cross-podcast matches aren't meaningful), using an indexed `hash_bucket` lookup (precomputed top-24-bits-of-hash) rather than loading the whole `episode_fingerprints` table, and persists any detected shared segments to the `ad_segments` table.
+- `GET /ads/candidates` reads straight from `ad_segments` (optionally filtered to a single `episode_id`) — a fast, already-computed lookup, not a request-time fingerprint comparison.
 

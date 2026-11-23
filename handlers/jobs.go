@@ -67,6 +67,17 @@ func (h *Handler) ClaimJob(c echo.Context) error {
 	if len(types) == 0 {
 		types = []podcast.JobType{podcast.JobTypeDownload, podcast.JobTypeFingerprint}
 	}
+	// detect_ads jobs require direct DB access to compare fingerprints and
+	// are only ever claimed in-process by the main app itself (see
+	// podcast.RunAdDetectionLoop) - never hand them out over this
+	// worker-facing API, regardless of what a caller requests.
+	filtered := types[:0:0]
+	for _, t := range types {
+		if t != podcast.JobTypeDetectAds {
+			filtered = append(filtered, t)
+		}
+	}
+	types = filtered
 
 	job, err := podcast.ClaimJob(h.db, types, req.WorkerID)
 	if err != nil {

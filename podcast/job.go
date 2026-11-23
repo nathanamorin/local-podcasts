@@ -24,6 +24,11 @@ type JobType string
 const (
 	JobTypeDownload    JobType = "download"
 	JobTypeFingerprint JobType = "fingerprint"
+	// JobTypeDetectAds is never claimed by the external worker-pod API
+	// (see handlers.ClaimJob's accepted types) - it requires direct,
+	// indexed DB access to compare fingerprints, so it's claimed and run
+	// in-process by the main app itself (see detectAdsLoop in cmd/server).
+	JobTypeDetectAds JobType = "detect_ads"
 )
 
 // JobStatus is the lifecycle state of a Job.
@@ -58,8 +63,8 @@ type Job struct {
 	// pending jobs and dozens of worker pods polling every few seconds on a
 	// single serialized writer connection, that made claims queue up
 	// severely enough that almost no jobs got processed.
-	PodcastID string     `json:"podcast_id"`
-	EpisodeID string     `json:"episode_id"`
+	PodcastID string     `json:"podcast_id" gorm:"index"`
+	EpisodeID string     `json:"episode_id" gorm:"index"`
 	Status    JobStatus  `json:"status" gorm:"index:idx_job_status_created,priority:1"`
 	Attempts  int        `json:"attempts"`
 	ClaimedBy string     `json:"claimed_by,omitempty"`
@@ -97,15 +102,31 @@ func (h HashBits) Uint64() uint64 {
 	return uint64(h)
 }
 
+// hashBucketShift matches FindAdCandidates'/detectAdsForEpisode's bucketing:
+// the top 24 bits of the 64-bit hash. Precomputing and storing this at
+// insert time (rather than computing it in every comparison query) lets the
+// per-episode ad-detection job use an indexed, bucket-scoped lookup instead
+// of pulling the entire (tens-of-millions-of-rows-and-growing)
+// episode_fingerprints table into memory.
+const hashBucketShift = 40
+
+// hashBucket computes the bucket key for a hash, as an unsigned (logical,
+// non-sign-extending) right shift - matching Go's uint64 >> semantics
+// exactly regardless of the hash's sign bit.
+func hashBucket(h uint64) uint32 {
+	return uint32(h >> hashBucketShift)
+}
+
 // EpisodeFingerprint is one overlapping-window audio fingerprint (see the
 // fingerprint package for how the hash is computed) for a given episode,
 // used to detect segments (e.g. ads) shared across episodes.
 type EpisodeFingerprint struct {
-	ID        uint     `json:"-" gorm:"primaryKey;autoIncrement"`
-	PodcastID string   `json:"podcast_id" gorm:"index"`
-	EpisodeID string   `json:"episode_id" gorm:"index"`
-	StartSec  float64  `json:"start_sec"`
-	Hash      HashBits `json:"hash" gorm:"index"`
+	ID         uint     `json:"-" gorm:"primaryKey;autoIncrement"`
+	PodcastID  string   `json:"podcast_id" gorm:"index"`
+	EpisodeID  string   `json:"episode_id" gorm:"index"`
+	StartSec   float64  `json:"start_sec"`
+	Hash       HashBits `json:"hash" gorm:"index"`
+	HashBucket uint32   `json:"-" gorm:"index"`
 }
 
 // enqueueJob creates a pending job for the given episode, unless one of the
@@ -338,6 +359,10 @@ func CompleteJob(db *gorm.DB, jobID string, success bool, errMsg string, result 
 		if err := applyFingerprintResult(db, &job, result); err != nil {
 			return err
 		}
+	case JobTypeDetectAds:
+		// No result payload to apply - detectAdsForEpisode (run by the
+		// in-process loop that claims these jobs) writes AdSegment rows
+		// itself before calling CompleteJob.
 	default:
 		return fmt.Errorf("unknown job type %q", job.Type)
 	}
@@ -348,9 +373,14 @@ func CompleteJob(db *gorm.DB, jobID string, success bool, errMsg string, result 
 		return err
 	}
 
-	if job.Type == JobTypeDownload {
+	switch job.Type {
+	case JobTypeDownload:
 		if err := EnqueueFingerprintJob(db, job.PodcastID, job.EpisodeID); err != nil {
 			klog.Errorf("error enqueuing fingerprint job for episode %s: %s", job.EpisodeID, err)
+		}
+	case JobTypeFingerprint:
+		if _, err := enqueueJob(db, JobTypeDetectAds, job.PodcastID, job.EpisodeID); err != nil {
+			klog.Errorf("error enqueuing ad-detection job for episode %s: %s", job.EpisodeID, err)
 		}
 	}
 	return nil
@@ -402,10 +432,11 @@ func applyFingerprintResult(db *gorm.DB, job *Job, result json.RawMessage) error
 	rows := make([]EpisodeFingerprint, 0, len(r.Chunks))
 	for _, c := range r.Chunks {
 		rows = append(rows, EpisodeFingerprint{
-			PodcastID: job.PodcastID,
-			EpisodeID: job.EpisodeID,
-			StartSec:  c.StartSec,
-			Hash:      HashBits(c.Hash),
+			PodcastID:  job.PodcastID,
+			EpisodeID:  job.EpisodeID,
+			StartSec:   c.StartSec,
+			Hash:       HashBits(c.Hash),
+			HashBucket: hashBucket(c.Hash),
 		})
 	}
 	return db.CreateInBatches(rows, 200).Error
@@ -416,7 +447,7 @@ func applyFingerprintResult(db *gorm.DB, job *Job, result json.RawMessage) error
 // than incrementally, since it's a cheap aggregate query and always reflects
 // ground truth.
 func RefreshJobGauges(db *gorm.DB) {
-	for _, jobType := range []JobType{JobTypeDownload, JobTypeFingerprint} {
+	for _, jobType := range []JobType{JobTypeDownload, JobTypeFingerprint, JobTypeDetectAds} {
 		metrics.PendingJobsGauge.WithLabelValues(string(jobType)).Set(countJobs(db, jobType, JobStatusPending))
 		metrics.ProcessingJobsGauge.WithLabelValues(string(jobType)).Set(countJobs(db, jobType, JobStatusProcessing))
 		metrics.FailedJobsGauge.WithLabelValues(string(jobType)).Set(countJobs(db, jobType, JobStatusFailed))

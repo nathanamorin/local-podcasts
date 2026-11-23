@@ -99,6 +99,12 @@ func main() {
 		}
 	}()
 
+	// detect_ads jobs need direct DB access (to compare fingerprints), so
+	// they're claimed and run in-process here, rather than handed out to
+	// worker pods like download/fingerprint jobs - see
+	// podcast.RunAdDetectionLoop.
+	go podcast.RunAdDetectionLoop(db, nil)
+
 	s := gocron.NewScheduler(time.UTC)
 	if _, err = s.Every(10).Minutes().Do(h.EnqueueAll); err != nil {
 		klog.Errorf("error setting up cron job refresh: %s", err)

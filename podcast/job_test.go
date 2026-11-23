@@ -237,6 +237,42 @@ func TestCompleteJob_FingerprintSuccess_WritesChunksIdempotently(t *testing.T) {
 	assert.Equal(t, int64(1), count)
 }
 
+func TestCompleteJob_FingerprintSuccess_SetsHashBucketAndChainsDetectAdsJob(t *testing.T) {
+	db := openTestDB(t)
+	require.NoError(t, EnqueueFingerprintJob(db, "pod1", "ep1"))
+	job, err := ClaimJob(db, []JobType{JobTypeFingerprint}, "worker-1")
+	require.NoError(t, err)
+	require.NotNil(t, job)
+
+	result, err := json.Marshal(FingerprintJobResult{Chunks: []FingerprintChunk{{StartSec: 0, Hash: 0xABCDEF0123456789}}})
+	require.NoError(t, err)
+	require.NoError(t, CompleteJob(db, job.ID, true, "", result))
+
+	var saved EpisodeFingerprint
+	require.NoError(t, db.Where("episode_id = ?", "ep1").First(&saved).Error)
+	assert.Equal(t, hashBucket(0xABCDEF0123456789), saved.HashBucket)
+
+	var detectCount int64
+	require.NoError(t, db.Model(&Job{}).Where("type = ? AND episode_id = ? AND status = ?", JobTypeDetectAds, "ep1", JobStatusPending).Count(&detectCount).Error)
+	assert.Equal(t, int64(1), detectCount, "expected a detect_ads job to be chained after fingerprint success")
+}
+
+func TestCompleteJob_DetectAdsSuccess_NeedsNoResultPayload(t *testing.T) {
+	db := openTestDB(t)
+	_, err := enqueueJob(db, JobTypeDetectAds, "pod1", "ep1")
+	require.NoError(t, err)
+
+	job, err := ClaimJob(db, []JobType{JobTypeDetectAds}, "main-app")
+	require.NoError(t, err)
+	require.NotNil(t, job)
+
+	require.NoError(t, CompleteJob(db, job.ID, true, "", nil))
+
+	var doneJob Job
+	require.NoError(t, db.First(&doneJob, "id = ?", job.ID).Error)
+	assert.Equal(t, JobStatusDone, doneJob.Status)
+}
+
 func TestCompleteJob_FailureRequeuesUntilMaxAttempts(t *testing.T) {
 	db := openTestDB(t)
 	require.NoError(t, EnqueueDownloadJob(db, "pod1", "ep1"))

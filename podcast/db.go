@@ -44,7 +44,7 @@ func InitDB(dsn string, maxOpenConns int) (*gorm.DB, error) {
 	sqlDB.SetMaxIdleConns(maxOpenConns)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	if err = db.AutoMigrate(&Podcast{}, &Episode{}, &Job{}, &EpisodeFingerprint{}); err != nil {
+	if err = db.AutoMigrate(&Podcast{}, &Episode{}, &Job{}, &EpisodeFingerprint{}, &AdSegment{}); err != nil {
 		return nil, fmt.Errorf("automigrate: %w", err)
 	}
 
