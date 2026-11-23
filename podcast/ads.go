@@ -17,6 +17,15 @@ const (
 	defaultMinClusterChunks = 2 // consecutive overlapping-window matches required to call it a candidate
 )
 
+// densityClusterWindowSec, densityClusterMinCount, and
+// densityClusterMinCoverage control densityClusterPass - see its doc
+// comment for what they mean.
+const (
+	densityClusterWindowSec   = 300 // 5 minutes
+	densityClusterMinCount    = 3
+	densityClusterMinCoverage = 0.05 // 5% of the window's duration
+)
+
 // AdCandidate is a segment of audio that two different episodes appear to
 // share (e.g. the same ad), expressed as the matching time range in each
 // episode. This is a candidate for user review, not an automatic skip.
@@ -140,10 +149,19 @@ func mergeCandidateRangesForEpisode(candidates []AdCandidate, episodeID string) 
 	for {
 		next, changed := mergePass(merged)
 		if !changed {
-			return next
+			merged = next
+			break
 		}
 		merged = next
 	}
+
+	// A final density pass catches fragmented ad pods that the pairwise
+	// gap-merge above can never bridge: a real ad break can contain
+	// several different back-to-back sponsor reads, but only the
+	// sub-clips that happen to verbatim-repeat in some other episode get
+	// flagged at all, so the gaps between them often exceed any
+	// individual clip's own length. See densityClusterPass.
+	return densityClusterPass(merged)
 }
 
 // mergePass makes a single left-to-right scan over sorted (by StartASec)
@@ -172,6 +190,104 @@ func mergePass(sorted []AdCandidate) ([]AdCandidate, bool) {
 		}
 	}
 	return merged, changed
+}
+
+// densityClusterPass merges groups of nearby candidates that a pairwise
+// gap-merge can never bridge: a real ad pod can be made up of several
+// different back-to-back sponsor reads, but cross-episode fingerprint
+// matching only ever flags the specific sub-clips that happen to repeat
+// verbatim in some other episode, so the gaps between those sub-clips
+// often exceed any individual clip's own length.
+//
+// A window of densityClusterWindowSec (5 minutes) qualifies as a dense
+// cluster when it contains both:
+//   - at least densityClusterMinCount (3) candidates, and
+//   - at least densityClusterMinCoverage (5%) of the window's duration
+//     covered by those candidates' own spans.
+//
+// Requiring both conditions avoids merging windows that technically
+// contain 3 candidate starts but are otherwise mostly empty (e.g. three
+// 1-2s blips scattered across 5 minutes) while still catching real
+// fragmented ad pods (e.g. three 7s clips plus a 57s clip spread across
+// ~265s, which the reported episode actually has).
+//
+// sorted must already be sorted by StartASec (as
+// mergeCandidateRangesForEpisode guarantees). Every candidate outside a
+// qualifying window is returned unchanged; each qualifying cluster
+// collapses into one AdCandidate spanning the earliest start to the
+// latest end in that cluster.
+func densityClusterPass(sorted []AdCandidate) []AdCandidate {
+	n := len(sorted)
+	if n < densityClusterMinCount {
+		return sorted
+	}
+
+	// dense[i] marks whether candidate i belongs to some qualifying
+	// window. Computed via a sliding two-pointer scan: for each left
+	// edge i, grow j as far as possible while staying within
+	// densityClusterWindowSec of candidates[i].StartASec. Anchoring
+	// candidate windows on every candidate's own start is sufficient to
+	// detect every qualifying window, since any qualifying window can be
+	// shifted left until its edge coincides with the earliest candidate
+	// it contains without losing members.
+	dense := make([]bool, n)
+	j := 0
+	for i := 0; i < n; i++ {
+		if j < i {
+			j = i
+		}
+		for j+1 < n && sorted[j+1].StartASec-sorted[i].StartASec <= densityClusterWindowSec {
+			j++
+		}
+		count := j - i + 1
+		if count < densityClusterMinCount {
+			continue
+		}
+		windowEnd := sorted[i].StartASec + densityClusterWindowSec
+		coverage := 0.0
+		for k := i; k <= j; k++ {
+			end := math.Min(sorted[k].EndASec, windowEnd)
+			start := math.Max(sorted[k].StartASec, sorted[i].StartASec)
+			if end > start {
+				coverage += end - start
+			}
+		}
+		if coverage/densityClusterWindowSec < densityClusterMinCoverage {
+			continue
+		}
+		for k := i; k <= j; k++ {
+			dense[k] = true
+		}
+	}
+
+	result := make([]AdCandidate, 0, n)
+	for i := 0; i < n; {
+		if !dense[i] {
+			result = append(result, sorted[i])
+			i++
+			continue
+		}
+		// Extend through the full contiguous run of dense candidates -
+		// adjacent/overlapping qualifying windows chain into one
+		// maximal cluster.
+		clusterStart := i
+		for i < n && dense[i] {
+			i++
+		}
+		clusterEnd := i - 1
+		merged := sorted[clusterStart]
+		for k := clusterStart + 1; k <= clusterEnd; k++ {
+			if sorted[k].EndASec > merged.EndASec {
+				merged.EndASec = sorted[k].EndASec
+				merged.PodcastBID = sorted[k].PodcastBID
+				merged.EpisodeBID = sorted[k].EpisodeBID
+				merged.StartBSec = sorted[k].StartBSec
+				merged.EndBSec = sorted[k].EndBSec
+			}
+		}
+		result = append(result, merged)
+	}
+	return result
 }
 
 // detectAdsForEpisode compares one episode's fingerprints against every

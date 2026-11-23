@@ -144,6 +144,63 @@ func TestFindAdCandidates_MergesTransitivelyAcrossMultiplePasses(t *testing.T) {
 	assert.Equal(t, 100.0, candidates[0].EndASec)
 }
 
+func TestFindAdCandidates_DensityMergesFragmentedAdPod(t *testing.T) {
+	db := openTestDB(t)
+
+	// Reproduces the reported scenario: four short matches (7s, 7s, 7s,
+	// 57s) spread across ~265s, none of which qualify for the pairwise
+	// gap-merge (every gap exceeds the adjacent pair's own max length),
+	// but all four fall within one 300s window with 4 (>=3) candidates
+	// and 78/300 = 26% (>=5%) combined coverage - a real fragmented ad
+	// pod, not isolated noise.
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epB", StartASec: 2278, EndASec: 2285, StartBSec: 1, EndBSec: 8}).Error)
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epC", StartASec: 2338, EndASec: 2345, StartBSec: 1, EndBSec: 8}).Error)
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epD", StartASec: 2408, EndASec: 2415, StartBSec: 1, EndBSec: 8}).Error)
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epE", StartASec: 2486, EndASec: 2543, StartBSec: 1, EndBSec: 58}).Error)
+
+	candidates, err := FindAdCandidates(db, "epA")
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, 2278.0, candidates[0].StartASec)
+	assert.Equal(t, 2543.0, candidates[0].EndASec)
+}
+
+func TestFindAdCandidates_DensityPassRequiresAtLeastThreeCandidates(t *testing.T) {
+	db := openTestDB(t)
+
+	// Only two 7s candidates, 100s apart (gap 100 > max(7,7)=7, so no
+	// pairwise gap-merge either). Both fall in the same 300s window, but
+	// a window with only 2 candidates must not density-merge, no matter
+	// how much of the window they cover.
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epB", StartASec: 0, EndASec: 7, StartBSec: 1, EndBSec: 8}).Error)
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epC", StartASec: 107, EndASec: 114, StartBSec: 1, EndBSec: 8}).Error)
+
+	candidates, err := FindAdCandidates(db, "epA")
+	require.NoError(t, err)
+	require.Len(t, candidates, 2)
+	assert.Equal(t, 0.0, candidates[0].StartASec)
+	assert.Equal(t, 7.0, candidates[0].EndASec)
+	assert.Equal(t, 107.0, candidates[1].StartASec)
+	assert.Equal(t, 114.0, candidates[1].EndASec)
+}
+
+func TestFindAdCandidates_DensityPassRequiresMinimumCoverage(t *testing.T) {
+	db := openTestDB(t)
+
+	// Three 1s candidates spread 100s apart (gap 100 > max(1,1)=1, so no
+	// pairwise gap-merge either). All three fall in one 300s window
+	// (count=3 qualifies), but they only cover 3/300 = 1% of it - far
+	// below the 5% coverage threshold - so this must remain 3 separate,
+	// essentially-isolated blips rather than being swept into one span.
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epB", StartASec: 0, EndASec: 1, StartBSec: 1, EndBSec: 2}).Error)
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epC", StartASec: 101, EndASec: 102, StartBSec: 1, EndBSec: 2}).Error)
+	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epD", StartASec: 202, EndASec: 203, StartBSec: 1, EndBSec: 2}).Error)
+
+	candidates, err := FindAdCandidates(db, "epA")
+	require.NoError(t, err)
+	require.Len(t, candidates, 3)
+}
+
 func TestFindAdCandidates_FiltersByEpisodeID(t *testing.T) {
 	db := openTestDB(t)
 	require.NoError(t, db.Create(&AdSegment{PodcastID: "p1", EpisodeAID: "epA", EpisodeBID: "epB", StartASec: 1, EndASec: 2, StartBSec: 3, EndBSec: 4}).Error)
