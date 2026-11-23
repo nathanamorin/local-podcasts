@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { Box, Button, CheckBox, Text } from 'grommet'
 import { Play, Pause, Next } from 'grommet-icons'
@@ -11,6 +12,7 @@ import { getClientInfo, setClientInfo, getAdSkipEnabled, setAdSkipEnabled } from
 import { theme, cardBackground } from '../pages/theme'
 
 const PLAYER_HEIGHT = '130px'
+const AD_MARKER_COLOR = 'rgba(224, 62, 45, 0.75)'
 
 // Merges overlapping/adjacent [start, end] ranges so playback only ever
 // needs to check/skip a single range at a time.
@@ -34,12 +36,15 @@ export function PlayerBar() {
   const playerRef = useRef(null)
   const [adSkipEnabled, setAdSkipEnabledState] = useState(getAdSkipEnabled())
   const [adRanges, setAdRanges] = useState([])
+  const [duration, setDuration] = useState(0)
+  const [progressBarEl, setProgressBarEl] = useState(null)
 
   // Load detected ad segments for the current episode so they can be
   // auto-skipped during playback. Ad detection is best-effort (audio
   // fingerprint matching across episodes), so this silently yields no
   // ranges until enough episodes have been fingerprinted.
   useEffect(() => {
+    setDuration(0)
     if (!currentEpisode) {
       setAdRanges([])
       return
@@ -60,15 +65,29 @@ export function PlayerBar() {
     return () => { cancelled = true }
   }, [currentEpisode?.id])
 
+  // react-h5-audio-player doesn't expose a way to render into its own
+  // progress bar, so find the underlying DOM node (stable for the life of
+  // this component - only one <AudioPlayer> instance ever renders here)
+  // once it's mounted and portal our ad-range markers into it, positioned
+  // as a percentage of track duration exactly like the library positions
+  // its own "played" overlay.
+  useLayoutEffect(() => {
+    const el = playerRef.current?.container?.current?.querySelector('.rhap_progress-bar')
+    if (el) setProgressBarEl(el)
+  }, [isConnected])
+
   function toggleAdSkip(enabled) {
     setAdSkipEnabledState(enabled)
     setAdSkipEnabled(enabled)
   }
 
   // When the player reports the current time, skip past any ad range the
-  // playhead has entered.
+  // playhead has entered, and keep duration up to date for the ad-marker
+  // overlay (duration can be unavailable until metadata/playback starts).
   function handleTimeUpdate(audio) {
-    if (!adSkipEnabled || adRanges.length === 0 || !audio) return
+    if (!audio) return
+    if (audio.duration && audio.duration !== duration) setDuration(audio.duration)
+    if (!adSkipEnabled || adRanges.length === 0) return
     const t = audio.currentTime
     const range = adRanges.find(r => t >= r.start && t < r.end)
     if (range) {
@@ -161,6 +180,7 @@ export function PlayerBar() {
           if (t !== null) e.target.currentTime = Number(t)
           setMediaSession()
         }}
+        onLoadedMetaData={e => setDuration(e.target.duration || 0)}
         onPlay={() => setMediaSession()}
         onEnded={() => {
           if (queue.length > 0) playNext()
@@ -176,6 +196,34 @@ export function PlayerBar() {
       />
     )
   }
+
+  // Colored markers showing where detected ad segments fall along the
+  // progress bar, portaled directly into react-h5-audio-player's own
+  // progress-bar element so they inherit its exact position/sizing and
+  // line up with native seek-by-click behavior (pointerEvents: 'none' lets
+  // clicks fall through to the real progress bar underneath).
+  const adMarkers = !isConnected && progressBarEl && duration > 0 && adRanges.length > 0
+    ? createPortal(
+      adRanges.map((r, i) => (
+        <div
+          key={i}
+          title="Detected ad"
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: `${(Math.min(r.start, duration) / duration) * 100}%`,
+            width: `${((Math.min(r.end, duration) - Math.min(r.start, duration)) / duration) * 100}%`,
+            background: AD_MARKER_COLOR,
+            borderRadius: '2px',
+            zIndex: 2,
+            pointerEvents: 'none',
+          }}
+        />
+      )),
+      progressBarEl
+    )
+    : null
 
   return (
     <Box
@@ -252,6 +300,7 @@ export function PlayerBar() {
 
       {/* Audio controls */}
       {controls}
+      {adMarkers}
     </Box>
   )
 }
