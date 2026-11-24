@@ -9,7 +9,6 @@ import (
 	"github.com/getkin/kin-openapi/openapi2conv"
 	"github.com/labstack/echo/v4"
 	"github.com/nathanamorin/local-podcasts/apidocs"
-	"github.com/nathanamorin/local-podcasts/podcast"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/swaggo/swag"
 	"k8s.io/klog/v2"
@@ -97,13 +96,12 @@ func (h *Handler) RedocBundle(c echo.Context) error {
 
 // Metrics godoc
 // @Summary      Prometheus metrics
-// @Description  Exposes application metrics (including local_podcasts_episode_downloads_total) in Prometheus text exposition format.
+// @Description  Exposes application metrics (including local_podcasts_episode_downloads_total) in Prometheus text exposition format. Job-queue gauges are refreshed on a background ticker (see cmd/server/main.go), not on scrape, so this handler never blocks on the DB.
 // @Tags         docs
 // @Produce      plain
 // @Success      200
 // @Router       /metrics [get]
 func (h *Handler) Metrics(c echo.Context) error {
-	podcast.RefreshJobGauges(h.db)
 	promhttp.Handler().ServeHTTP(c.Response(), c.Request())
 	return nil
 }

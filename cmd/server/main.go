@@ -109,6 +109,15 @@ func main() {
 	if _, err = s.Every(10).Minutes().Do(h.EnqueueAll); err != nil {
 		klog.Errorf("error setting up cron job refresh: %s", err)
 	}
+	// Job-queue gauges (local_podcasts_pending_jobs etc.) are refreshed here
+	// on a ticker rather than synchronously in the /metrics handler, so a
+	// contended jobs table (e.g. during a large worker-pool backlog drain)
+	// can't make /metrics scrapes slow enough to miss Alloy's scrape
+	// timeout - see podcast.RefreshJobGauges.
+	podcast.RefreshJobGauges(db)
+	if _, err = s.Every(15).Seconds().Do(func() { podcast.RefreshJobGauges(db) }); err != nil {
+		klog.Errorf("error setting up job gauge refresh: %s", err)
+	}
 	s.StartAsync()
 
 	// Serve static files and fall back to index.html for SPA client-side routes.

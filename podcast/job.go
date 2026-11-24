@@ -443,9 +443,15 @@ func applyFingerprintResult(db *gorm.DB, job *Job, result json.RawMessage) error
 }
 
 // RefreshJobGauges recomputes the pending/processing/failed job-queue gauges
-// from current DB state. Called on every /metrics scrape (pull-based) rather
-// than incrementally, since it's a cheap aggregate query and always reflects
-// ground truth.
+// from current DB state. Run on a periodic background ticker (see
+// cmd/server/main.go) rather than incrementally or synchronously per
+// /metrics scrape: each call issues 12 COUNT queries against the jobs
+// table, and under heavy worker load (many claim/complete requests
+// contending for the same DB connection pool) that was slow enough to make
+// /metrics scrapes miss Alloy's scrape timeout, causing intermittent gaps
+// in queue-depth dashboards. Decoupling the refresh from the scrape path
+// means a scrape is always just a fast in-memory read of the
+// last-computed gauge values.
 func RefreshJobGauges(db *gorm.DB) {
 	for _, jobType := range []JobType{JobTypeDownload, JobTypeFingerprint, JobTypeDetectAds} {
 		metrics.PendingJobsGauge.WithLabelValues(string(jobType)).Set(countJobs(db, jobType, JobStatusPending))

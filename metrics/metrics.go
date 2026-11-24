@@ -39,9 +39,11 @@ func RecordEpisodeDownload(podcastName string, status EpisodeDownloadStatus) {
 // track the background job queue (episode downloads + fingerprinting,
 // performed by separate worker pods) by job type, so dashboards/alerts and
 // the KEDA autoscaler can observe backlog depth and throughput. These are
-// refreshed on each scrape (see podcast.RefreshJobGauges, called from
-// handlers.Handler.Metrics) rather than updated incrementally, since they
-// reflect current DB state.
+// refreshed on a periodic background ticker (see podcast.RefreshJobGauges,
+// scheduled from cmd/server/main.go) rather than updated incrementally or
+// on each scrape, since they reflect current DB state but must not make
+// /metrics latency (and therefore scrape reliability) depend on how
+// contended the jobs table happens to be at scrape time.
 var PendingJobsGauge = promauto.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Name: "local_podcasts_pending_jobs",
