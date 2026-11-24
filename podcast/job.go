@@ -120,13 +120,20 @@ func hashBucket(h uint64) uint32 {
 // EpisodeFingerprint is one overlapping-window audio fingerprint (see the
 // fingerprint package for how the hash is computed) for a given episode,
 // used to detect segments (e.g. ads) shared across episodes.
+// PodcastID/EpisodeID and PodcastID/HashBucket are each also covered by a
+// composite index: both pairs are queried together as equality filters on
+// every fingerprint-job completion and ad-detection run (see
+// applyFingerprintResult's delete-then-insert and detectAdsForEpisode in
+// ads.go), and on this table's scale (tens of millions of rows) the single-
+// column indexes alone force a bitmap-and-filter scan rather than a direct
+// composite lookup.
 type EpisodeFingerprint struct {
 	ID         uint     `json:"-" gorm:"primaryKey;autoIncrement"`
-	PodcastID  string   `json:"podcast_id" gorm:"index"`
-	EpisodeID  string   `json:"episode_id" gorm:"index"`
+	PodcastID  string   `json:"podcast_id" gorm:"index;index:idx_episode_fingerprints_podcast_episode,priority:1;index:idx_episode_fingerprints_podcast_hash_bucket,priority:1"`
+	EpisodeID  string   `json:"episode_id" gorm:"index;index:idx_episode_fingerprints_podcast_episode,priority:2"`
 	StartSec   float64  `json:"start_sec"`
 	Hash       HashBits `json:"hash" gorm:"index"`
-	HashBucket uint32   `json:"-" gorm:"index"`
+	HashBucket uint32   `json:"-" gorm:"index;index:idx_episode_fingerprints_podcast_hash_bucket,priority:2"`
 }
 
 // enqueueJob creates a pending job for the given episode, unless one of the
