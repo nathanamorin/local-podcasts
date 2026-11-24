@@ -104,7 +104,7 @@ func (h *Handler) ClaimJob(c echo.Context) error {
 		if !ok {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "episode not found for job"})
 		}
-		resp.RSSAudioURL = ep.AudioFile
+		resp.RSSAudioURL = ep.RSSAudioURL
 	}
 
 	return c.JSON(http.StatusOK, resp)
