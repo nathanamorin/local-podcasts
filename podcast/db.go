@@ -2,6 +2,7 @@ package podcast
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/nathanamorin/local-podcasts/metrics"
@@ -58,6 +59,35 @@ func InitDB(dsn string, maxOpenConns int) (*gorm.DB, error) {
 // (a sync.Map scoped to a single GORM operation, cleared for the next one).
 const queryStartSetting = "metrics:query_start"
 
+// maxQueryLabelLen caps the "query" label value's length. This is defense
+// in depth on top of bulkValuesPattern below: Mimir rejects an entire
+// remote-write batch (every metric in it, not just the offending series)
+// if any single label value exceeds its configured max length, so this
+// must never be allowed to grow unbounded.
+const maxQueryLabelLen = 200
+
+// bulkValuesPattern matches a multi-row "VALUES (...),(...),(...)" clause
+// (as GORM generates for e.g. batched *gorm.DB.CreateInBatches/Save calls)
+// and collapses it to a single representative tuple. Without this, a bulk
+// insert's query template - and therefore its label cardinality - varies
+// with the batch size (the number of rows it was called with), and large
+// batches (e.g. the ad-segment merge writing hundreds of rows at once)
+// blow well past maxQueryLabelLen on their own.
+var bulkValuesPattern = regexp.MustCompile(`(?i)VALUES\s*\([^)]*\)(?:\s*,\s*\([^)]*\))*`)
+
+// normalizeQueryLabel turns a parameterized SQL query template into a safe
+// Prometheus label value: every VALUES group (whether a single-row insert
+// or a many-row bulk insert) is collapsed to the same fixed placeholder, so
+// the label is both stable and independent of batch size, and the result
+// is hard-truncated to maxQueryLabelLen as a final safety net.
+func normalizeQueryLabel(query string) string {
+	query = bulkValuesPattern.ReplaceAllString(query, "VALUES (...)")
+	if len(query) > maxQueryLabelLen {
+		query = query[:maxQueryLabelLen] + "...(truncated)"
+	}
+	return query
+}
+
 // registerQueryDurationCallbacks instruments every GORM operation type
 // (create/query/update/delete/row/raw) on gdb to observe its duration into
 // metrics.QueryDuration, labeled with dbLabel and the parameterized SQL
@@ -82,6 +112,8 @@ func registerQueryDurationCallbacks(gdb *gorm.DB, dbLabel string) {
 			query := tx.Statement.SQL.String()
 			if query == "" {
 				query = "unknown"
+			} else {
+				query = normalizeQueryLabel(query)
 			}
 			metrics.QueryDuration.WithLabelValues(dbLabel, operation, query).Observe(time.Since(start).Seconds())
 		}

@@ -61,6 +61,34 @@ func TestRegisterQueryDurationCallbacks_WriteDB(t *testing.T) {
 	assert.True(t, found, "expected a query-duration series for a podcasts query, got labels: %v", labels)
 }
 
+// TestNormalizeQueryLabel_CollapsesBulkValues verifies that a multi-row
+// VALUES clause (as GORM emits for a batched insert, e.g. the ad-segment
+// merge writing hundreds of rows in one statement) is collapsed to a single
+// representative tuple, regardless of how many rows the batch had - this is
+// what keeps a bulk insert's label cardinality (and length) independent of
+// its batch size.
+func TestNormalizeQueryLabel_CollapsesBulkValues(t *testing.T) {
+	small := `INSERT INTO "ad_segments" ("podcast_id","start_a_sec") VALUES ($1,$2)`
+	big := `INSERT INTO "ad_segments" ("podcast_id","start_a_sec") VALUES ($1,$2),($3,$4),($5,$6),($7,$8),($9,$10)`
+
+	assert.Equal(t, normalizeQueryLabel(small), normalizeQueryLabel(big),
+		"bulk inserts of different batch sizes must normalize to the same label value")
+	assert.NotContains(t, normalizeQueryLabel(big), "$9", "collapsed VALUES clause should not retain every row's placeholders")
+}
+
+// TestNormalizeQueryLabel_TruncatesLongQueries verifies the hard length cap
+// that exists as a final safety net: Mimir rejects an entire remote-write
+// batch (not just the offending series) if any single label value exceeds
+// its configured max length, so no query template may be allowed through
+// unbounded.
+func TestNormalizeQueryLabel_TruncatesLongQueries(t *testing.T) {
+	longQuery := "SELECT * FROM x WHERE " + strings.Repeat("col = $1 AND ", 50)
+
+	got := normalizeQueryLabel(longQuery)
+
+	assert.LessOrEqual(t, len(got), maxQueryLabelLen+len("...(truncated)"))
+}
+
 // TestInitDB_ConcurrentWriters verifies that concurrent writers can all
 // succeed against the same DB without error - exercising the connection
 // pool under real concurrency, unlike SQLite's single-physical-writer
