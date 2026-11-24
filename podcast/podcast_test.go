@@ -145,6 +145,62 @@ func TestSavePodcastMetadata_Upsert(t *testing.T) {
 	assert.Equal(t, "Updated Name", saved.Name)
 }
 
+// TestSavePodcastMetadata_DoesNotClobberConcurrentDownload is a regression
+// test for a race between Update()'s (RSS-fetch-bound, so potentially slow)
+// in-memory Podcast snapshot and a concurrent download job completing for
+// one of its episodes. Before this fix, SavePodcastMetadata blindly
+// db.Save()'d every in-memory Episode (via syncNewData's merged snapshot),
+// so if a download completed (setting AudioFile to a local filename) after
+// the snapshot was taken but before this save ran, the save would silently
+// revert AudioFile back to the pre-download URL — leaving the episode
+// permanently stuck (nothing else re-triggers a download for an episode
+// whose AudioFile already looks like a URL... other than another Update()
+// cycle repeating the same clobber forever).
+func TestSavePodcastMetadata_DoesNotClobberConcurrentDownload(t *testing.T) {
+	db := openTestDB(t)
+	config := tempConfig(t)
+
+	p := mustParseRss(t, testData, "https://test123")
+	savePodcast(t, p, config, db)
+	require.Len(t, p.Episodes, 2)
+
+	target := p.Episodes[0]
+	originalRSSURL := target.AudioFile // AudioFile == RSSAudioURL at first save
+
+	// Simulate a download job completing for this episode directly in the
+	// DB - exactly what podcast.applyDownloadResult does on success.
+	require.NoError(t, db.Model(&Episode{}).
+		Where("podcast_id = ? AND id = ?", target.PodcastID, target.Id).
+		Updates(map[string]interface{}{
+			"audio_file": "local-file.mp3",
+			"length":     int64(1234),
+		}).Error)
+
+	// Build a stale snapshot like Update() would have taken *before* that
+	// download completed: a fresh RSS parse (so AudioFile is still the
+	// original URL) with preExistingEpisodeIDs populated as syncNewData
+	// would for a podcast that already has both episodes.
+	stale := mustParseRss(t, testData, "https://test123")
+	stale.Id = p.Id
+	stale.preExistingEpisodeIDs = map[string]struct{}{
+		p.Episodes[0].Id: {},
+		p.Episodes[1].Id: {},
+	}
+	for _, ep := range stale.Episodes {
+		ep.PodcastID = p.Id
+	}
+
+	require.NoError(t, stale.SavePodcastMetadata(config, db))
+
+	var saved Episode
+	require.NoError(t, db.Where("podcast_id = ? AND id = ?", target.PodcastID, target.Id).First(&saved).Error)
+	assert.Equal(t, "local-file.mp3", saved.AudioFile, "stale RSS sync must not revert a concurrently-completed download")
+	assert.Equal(t, int64(1234), saved.Length, "stale RSS sync must not revert a concurrently-completed download's length")
+	assert.Equal(t, originalRSSURL, saved.RSSAudioURL, "RSSAudioURL is unaffected either way in this scenario")
+	// RSS-sourced metadata should still sync normally for existing episodes.
+	assert.Equal(t, target.Name, saved.Name)
+}
+
 // ---------------------------------------------------------------------------
 // GetPodcast
 // ---------------------------------------------------------------------------

@@ -88,6 +88,13 @@ type Podcast struct {
 	RSSUrl            string     `json:"rss_url"`
 	DisableAutoUpdate bool       `json:"disable_auto_update,omitempty"`
 	LatestEpisode     *Episode   `json:"latest_episode" gorm:"-"`
+
+	// preExistingEpisodeIDs records, as of the start of syncNewData, which
+	// episode IDs were already known (as opposed to newly discovered in this
+	// RSS sync). Update uses it to avoid blindly overwriting the download
+	// pipeline's own fields (AudioFile/RSSAudioURL/Length) for episodes that
+	// already existed - see saveEpisode's doc comment for why.
+	preExistingEpisodeIDs map[string]struct{}
 }
 
 type Config struct {
@@ -576,6 +583,11 @@ func (p *Podcast) syncNewData(feedData string) error {
 		p.episodesMap = make(map[string]*Episode)
 	}
 
+	p.preExistingEpisodeIDs = make(map[string]struct{}, len(p.episodesMap))
+	for id := range p.episodesMap {
+		p.preExistingEpisodeIDs[id] = struct{}{}
+	}
+
 	for id, ep := range newPodcastInfo.episodesMap {
 		if _, exists := p.episodesMap[id]; !exists {
 			p.episodesMap[id] = ep
@@ -599,8 +611,19 @@ func (p *Podcast) syncNewData(feedData string) error {
 	return nil
 }
 
+// saveEpisode persists a single episode after RSS sync. Like
+// saveEpisodesFromFeed (used by SavePodcastMetadata just before this is
+// called per-episode in Update), existing episodes are restricted to
+// episodeFeedSyncColumns so a stale in-memory snapshot can never clobber a
+// concurrent download/requeue's AudioFile/RSSAudioURL/Length.
 func (p *Podcast) saveEpisode(ep *Episode, db *gorm.DB) error {
 	ep.PodcastID = p.Id
+	if _, existed := p.preExistingEpisodeIDs[ep.Id]; existed {
+		return db.Model(&Episode{}).
+			Where("podcast_id = ? AND id = ?", ep.PodcastID, ep.Id).
+			Select(episodeFeedSyncColumns).
+			Updates(ep).Error
+	}
 	return db.Save(ep).Error
 }
 
@@ -809,8 +832,53 @@ func (p *Podcast) SavePodcastMetadata(config Config, db *gorm.DB) error {
 		if len(p.Episodes) == 0 {
 			return nil
 		}
-		return tx.Save(&p.Episodes).Error
+		return p.saveEpisodesFromFeed(tx)
 	})
+}
+
+// episodeFeedSyncColumns are the only episode columns an RSS-feed sync is
+// ever allowed to overwrite for an episode that already existed before this
+// sync cycle began. AudioFile/RSSAudioURL/Length are owned by the download
+// job pipeline (podcast/job.go's ClaimJob/CompleteJob and
+// PodcastWatcher.RequeueEpisodeDownload) — a Podcast snapshot taken at the
+// start of a (possibly slow, RSS-fetch-bound) Update() call can go stale
+// relative to a concurrent download completing or a requeue resetting
+// AudioFile back to a URL; blindly re-saving the whole stale in-memory
+// Episode row would silently revert that concurrent change, leaving the
+// episode permanently unplayable (the DB says "downloaded" with a stale
+// filename/URL that no longer matches reality, and nothing else will ever
+// retry it). New episodes (first seen in this sync) have no such concurrent
+// writer yet, so they're always safe to insert in full.
+var episodeFeedSyncColumns = []string{"name", "description", "read_order", "publish_timestamp"}
+
+// saveEpisodesFromFeed persists p.Episodes (set by syncNewData), splitting
+// brand-new episodes (safe to insert in full) from already-existing ones
+// (restricted to episodeFeedSyncColumns — see its doc comment).
+func (p *Podcast) saveEpisodesFromFeed(db *gorm.DB) error {
+	var newEpisodes []*Episode
+	var existingEpisodes []*Episode
+	for _, ep := range p.Episodes {
+		if _, existed := p.preExistingEpisodeIDs[ep.Id]; existed {
+			existingEpisodes = append(existingEpisodes, ep)
+		} else {
+			newEpisodes = append(newEpisodes, ep)
+		}
+	}
+
+	if len(newEpisodes) > 0 {
+		if err := db.Save(&newEpisodes).Error; err != nil {
+			return fmt.Errorf("insert new episodes: %w", err)
+		}
+	}
+	for _, ep := range existingEpisodes {
+		if err := db.Model(&Episode{}).
+			Where("podcast_id = ? AND id = ?", ep.PodcastID, ep.Id).
+			Select(episodeFeedSyncColumns).
+			Updates(ep).Error; err != nil {
+			return fmt.Errorf("update existing episode %s: %w", ep.Id, err)
+		}
+	}
+	return nil
 }
 
 func (p *Podcast) fillEpisodeMap() {
