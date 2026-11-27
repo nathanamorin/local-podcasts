@@ -15,6 +15,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,10 @@ import (
 	"time"
 
 	"github.com/ardanlabs/conf/v3"
+	"github.com/ardanlabs/kronk/sdk/bucky"
+	"github.com/ardanlabs/kronk/sdk/bucky/model"
+	buckylibs "github.com/ardanlabs/kronk/sdk/tools/bucky/libs"
+	buckymodels "github.com/ardanlabs/kronk/sdk/tools/bucky/models"
 	"github.com/nathanamorin/local-podcasts/fingerprint"
 	"github.com/nathanamorin/local-podcasts/podcast"
 	_ "go.uber.org/automaxprocs" // sets GOMAXPROCS from the container's cgroup CPU limit so CPU-bound parallelism (fingerprinting) doesn't oversubscribe and get throttled
@@ -44,7 +49,20 @@ type workerConfig struct {
 	PublicAPIURL   string        `conf:"env:PUBLIC_API_URL,default:http://local-podcasts.local-podcasts.svc.cluster.local:8080,help:base URL of the main app's public API (used to stream audio for fingerprinting)"`
 	PollInterval   time.Duration `conf:"default:3s,help:how often to poll for a new job when idle"`
 	Concurrency    int           `conf:"default:2,help:number of jobs this pod processes concurrently"`
-	JobTypes       string        `conf:"default:download;fingerprint,help:semicolon-separated job types this worker pod accepts (split on comma or semicolon)"`
+	JobTypes       string        `conf:"default:download;fingerprint;transcribe,help:semicolon-separated job types this worker pod accepts (split on comma or semicolon)"`
+
+	// WhisperModel is a kronk/bucky model short name (e.g. "base",
+	// "small", "base.en") or a direct model file URL/path - see
+	// buckymodels.SupportedModels(). "base" is multilingual (podcasts
+	// aren't all English) and balances speed against accuracy for
+	// CPU-only transcription.
+	WhisperModel string `conf:"default:base,help:whisper model (short name or path/URL) used for transcription"`
+	// WhisperCacheDir is the per-node cache directory for the downloaded
+	// whisper.cpp native library and model files - see initWhisper. In
+	// Kubernetes this is backed by a hostPath volume so the (one-time,
+	// multi-hundred-MB) download survives worker pod restarts and is
+	// shared by every worker pod scheduled onto the same node.
+	WhisperCacheDir string `conf:"env:WHISPER_CACHE_DIR,default:/var/cache/kronk,help:per-node cache directory for whisper.cpp libraries and model files"`
 }
 
 // jobResponse mirrors handlers.jobResponse — the two are not shared via
@@ -76,6 +94,20 @@ func main() {
 	types := strings.FieldsFunc(cfg.JobTypes, func(r rune) bool { return r == ',' || r == ';' })
 	klog.Infof("starting local-podcasts worker build[%s] internal-api[%s] public-api[%s] id[%s] types[%v] concurrency[%d]",
 		build, cfg.InternalAPIURL, cfg.PublicAPIURL, hostname, types, cfg.Concurrency)
+
+	// Eagerly load the whisper library/model once at startup (rather than
+	// lazily on the first transcribe job) so a broken cache/model fails
+	// loudly in the pod's logs immediately, and so the one-time
+	// multi-hundred-MB download doesn't race against cfg.Concurrency
+	// goroutines all claiming a transcribe job at once.
+	for _, t := range types {
+		if podcast.JobType(t) == podcast.JobTypeTranscribe {
+			if _, err := initWhisper(cfg); err != nil {
+				klog.Errorf("whisper init failed, transcribe jobs will fail until this is resolved: %s", err)
+			}
+			break
+		}
+	}
 
 	client := &http.Client{Timeout: 15 * time.Minute} // generous: large episode downloads
 
@@ -153,6 +185,8 @@ func processJob(client *http.Client, internalURL, publicURL string, job *jobResp
 	switch podcast.JobType(job.Type) {
 	case podcast.JobTypeFingerprint:
 		result, procErr = doFingerprint(client, publicURL, job)
+	case podcast.JobTypeTranscribe:
+		result, procErr = doTranscribe(client, publicURL, job)
 	default:
 		procErr = fmt.Errorf("unknown job type %q", job.Type)
 	}
@@ -262,6 +296,118 @@ func doFingerprint(client *http.Client, publicURL string, job *jobResponse) (*po
 	result := &podcast.FingerprintJobResult{Chunks: make([]podcast.FingerprintChunk, 0, len(chunks))}
 	for _, c := range chunks {
 		result.Chunks = append(result.Chunks, podcast.FingerprintChunk{StartSec: c.StartSec, Hash: c.Hash})
+	}
+	return result, nil
+}
+
+// whisperHandle is a single shared *bucky.Bucky loaded once per worker
+// process (not per job) and reused across every goroutine/job - Bucky has
+// its own internal admission semaphore and is safe for concurrent
+// Transcribe/TranscribeFile calls, so there's no need (and it'd be wasteful
+// given the model's size) to load one handle per concurrent job.
+var (
+	whisperInitOnce sync.Once
+	whisperHandle   *bucky.Bucky
+	whisperInitErr  error
+)
+
+// initWhisper downloads (on first run per node; a no-op afterwards, see
+// WhisperCacheDir's hostPath-backed per-node cache) the whisper.cpp native
+// library and model files, then loads the model into a shared Bucky
+// handle. Only the first call's cfg is used - safe to call repeatedly
+// (e.g. lazily from doTranscribe) since sync.Once makes the actual work
+// run exactly once.
+func initWhisper(cfg workerConfig) (*bucky.Bucky, error) {
+	whisperInitOnce.Do(func() {
+		ctx := context.Background()
+		log := bucky.FmtLogger
+
+		lib, err := buckylibs.New(buckylibs.WithBasePath(cfg.WhisperCacheDir))
+		if err != nil {
+			whisperInitErr = fmt.Errorf("init whisper lib manager: %w", err)
+			return
+		}
+		if _, err := lib.Download(ctx, log); err != nil {
+			whisperInitErr = fmt.Errorf("download whisper.cpp library: %w", err)
+			return
+		}
+		if err := bucky.Init(bucky.WithLibPath(lib.LibsPath())); err != nil {
+			whisperInitErr = fmt.Errorf("init whisper backend: %w", err)
+			return
+		}
+
+		mdls, err := buckymodels.NewWithPaths(cfg.WhisperCacheDir)
+		if err != nil {
+			whisperInitErr = fmt.Errorf("init whisper model catalog: %w", err)
+			return
+		}
+		mp, err := mdls.Download(ctx, log, cfg.WhisperModel)
+		if err != nil {
+			whisperInitErr = fmt.Errorf("download whisper model %q: %w", cfg.WhisperModel, err)
+			return
+		}
+		if len(mp.ModelFiles) == 0 {
+			whisperInitErr = fmt.Errorf("whisper model %q has no model files", cfg.WhisperModel)
+			return
+		}
+
+		b, err := bucky.New(
+			model.WithModelPath(mp.ModelFiles[0]),
+			model.WithUseGPU(false), // CPU-only, matching the rest of this worker fleet
+			model.WithLog(log),
+		)
+		if err != nil {
+			whisperInitErr = fmt.Errorf("load whisper model %q: %w", cfg.WhisperModel, err)
+			return
+		}
+		whisperHandle = b
+		klog.Infof("whisper model %q loaded from cache[%s]", cfg.WhisperModel, cfg.WhisperCacheDir)
+	})
+	return whisperHandle, whisperInitErr
+}
+
+// doTranscribe fetches the episode's already-downloaded audio from the main
+// app's public streaming endpoint (same mechanism as doFingerprint) and
+// transcribes it with the shared whisper handle.
+func doTranscribe(client *http.Client, publicURL string, job *jobResponse) (*podcast.TranscribeJobResult, error) {
+	b, err := initWhisper(workerConfig{})
+	if err != nil {
+		return nil, fmt.Errorf("whisper not available: %w", err)
+	}
+
+	streamURL := fmt.Sprintf("%s/podcasts/%s/episodes/%s/stream", publicURL, job.PodcastID, job.EpisodeID)
+
+	resp, err := client.Get(streamURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetch audio for transcription: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected HTTP %d fetching audio: %s", resp.StatusCode, string(data))
+	}
+
+	// No overall deadline: whisper inference of a long episode on CPU with
+	// the "base" model can legitimately take well beyond a typical request
+	// timeout (see transcribeJobLeaseTimeout in podcast/job.go, which gives
+	// this job type a much longer claim lease precisely because of this).
+	transcription, err := b.TranscribeFile(context.Background(), resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("transcribe audio: %w", err)
+	}
+
+	result := &podcast.TranscribeJobResult{
+		Language: transcription.Language,
+		Text:     transcription.Text,
+		Segments: make([]podcast.TranscriptSegment, 0, len(transcription.Segments)),
+	}
+	for _, s := range transcription.Segments {
+		result.Segments = append(result.Segments, podcast.TranscriptSegment{
+			Index:   s.Index,
+			StartMs: s.StartMs,
+			EndMs:   s.EndMs,
+			Text:    s.Text,
+		})
 	}
 	return result, nil
 }

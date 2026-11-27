@@ -64,6 +64,48 @@ func TestEnqueueMissingFingerprintJobs(t *testing.T) {
 	assert.Equal(t, 0, enqueued)
 }
 
+func TestEnqueueMissingTranscribeJobs(t *testing.T) {
+	db := openTestDB(t)
+	p := NewPodcastObj()
+	p.Id = "pod1"
+	p.Name = "Pod One"
+	p.Episodes = []*Episode{
+		// ep1: downloaded, already transcribed - should be skipped.
+		{PodcastID: "pod1", Id: "ep1", AudioFile: "ep1.mp3"},
+		// ep2: downloaded, no transcript yet - should be enqueued.
+		{PodcastID: "pod1", Id: "ep2", AudioFile: "ep2.mp3"},
+		// ep3: downloaded, previously had a transcribe job fail - should
+		// still be enqueued (retried), since it has no transcript row.
+		{PodcastID: "pod1", Id: "ep3", AudioFile: "ep3.mp3"},
+		// ep4: not downloaded yet (no audio file) - should be skipped.
+		{PodcastID: "pod1", Id: "ep4", AudioFile: ""},
+	}
+	require.NoError(t, p.SavePodcastMetadata(Config{FileHome: t.TempDir()}, db))
+	for _, ep := range p.Episodes {
+		require.NoError(t, db.Save(ep).Error)
+	}
+
+	require.NoError(t, upsertEpisodeTranscript(db, &EpisodeTranscript{PodcastID: "pod1", EpisodeID: "ep1", Text: "hello"}))
+	require.NoError(t, db.Create(&Job{ID: "failed-job", Type: JobTypeTranscribe, PodcastID: "pod1", EpisodeID: "ep3", Status: JobStatusFailed}).Error)
+
+	enqueued, err := EnqueueMissingTranscribeJobs(db)
+	require.NoError(t, err)
+	assert.Equal(t, 2, enqueued)
+
+	var pending []Job
+	require.NoError(t, db.Where("type = ? AND status = ?", JobTypeTranscribe, JobStatusPending).Find(&pending).Error)
+	gotEpisodes := make([]string, 0, len(pending))
+	for _, j := range pending {
+		gotEpisodes = append(gotEpisodes, j.EpisodeID)
+	}
+	assert.ElementsMatch(t, []string{"ep2", "ep3"}, gotEpisodes)
+
+	// Calling again should be a no-op now that both are pending.
+	enqueued, err = EnqueueMissingTranscribeJobs(db)
+	require.NoError(t, err)
+	assert.Equal(t, 0, enqueued)
+}
+
 func TestClaimJob_ReturnsOldestPendingAndMarksProcessing(t *testing.T) {
 	db := openTestDB(t)
 
@@ -195,6 +237,10 @@ func TestCompleteJob_DownloadSuccess_UpdatesEpisodeAndChainsFingerprintJob(t *te
 	var fpCount int64
 	require.NoError(t, db.Model(&Job{}).Where("type = ? AND episode_id = ? AND status = ?", JobTypeFingerprint, "ep1", JobStatusPending).Count(&fpCount).Error)
 	assert.Equal(t, int64(1), fpCount, "expected a fingerprint job to be chained after download success")
+
+	var transcribeCount int64
+	require.NoError(t, db.Model(&Job{}).Where("type = ? AND episode_id = ? AND status = ?", JobTypeTranscribe, "ep1", JobStatusPending).Count(&transcribeCount).Error)
+	assert.Equal(t, int64(1), transcribeCount, "expected a transcribe job to be chained (in parallel with fingerprinting) after download success")
 }
 
 func TestCompleteJob_FingerprintSuccess_WritesChunksIdempotently(t *testing.T) {
@@ -255,6 +301,49 @@ func TestCompleteJob_FingerprintSuccess_SetsHashBucketAndChainsDetectAdsJob(t *t
 	var detectCount int64
 	require.NoError(t, db.Model(&Job{}).Where("type = ? AND episode_id = ? AND status = ?", JobTypeDetectAds, "ep1", JobStatusPending).Count(&detectCount).Error)
 	assert.Equal(t, int64(1), detectCount, "expected a detect_ads job to be chained after fingerprint success")
+}
+
+func TestCompleteJob_TranscribeSuccess_UpsertsTranscript(t *testing.T) {
+	db := openTestDB(t)
+	require.NoError(t, EnqueueTranscribeJob(db, "pod1", "ep1"))
+	job, err := ClaimJob(db, []JobType{JobTypeTranscribe}, "worker-1")
+	require.NoError(t, err)
+	require.NotNil(t, job)
+
+	result, err := json.Marshal(TranscribeJobResult{
+		Language: "en",
+		Text:     "hello world",
+		Segments: []TranscriptSegment{{Index: 0, StartMs: 0, EndMs: 1000, Text: "hello world"}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, CompleteJob(db, job.ID, true, "", result))
+
+	transcript, err := GetEpisodeTranscript(db, "pod1", "ep1")
+	require.NoError(t, err)
+	assert.Equal(t, "en", transcript.Language)
+	assert.Equal(t, "hello world", transcript.Text)
+	require.Len(t, transcript.Segments, 1)
+	assert.Equal(t, int64(1000), transcript.Segments[0].EndMs)
+
+	// Re-running transcription for the same episode should replace, not
+	// duplicate, the prior row (idempotent re-runs / backfill / model
+	// upgrades).
+	require.NoError(t, EnqueueTranscribeJob(db, "pod1", "ep1"))
+	job2, err := ClaimJob(db, []JobType{JobTypeTranscribe}, "worker-2")
+	require.NoError(t, err)
+	require.NotNil(t, job2)
+
+	result2, err := json.Marshal(TranscribeJobResult{Language: "en", Text: "updated text"})
+	require.NoError(t, err)
+	require.NoError(t, CompleteJob(db, job2.ID, true, "", result2))
+
+	var count int64
+	require.NoError(t, db.Model(&EpisodeTranscript{}).Where("episode_id = ?", "ep1").Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+
+	transcript, err = GetEpisodeTranscript(db, "pod1", "ep1")
+	require.NoError(t, err)
+	assert.Equal(t, "updated text", transcript.Text)
 }
 
 func TestCompleteJob_DetectAdsSuccess_NeedsNoResultPayload(t *testing.T) {

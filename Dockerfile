@@ -1,4 +1,16 @@
-FROM golang:1.26-alpine AS build
+# The whisper.cpp shared library that Kronk (see cmd/worker) dlopens at
+# runtime is linked against a very recent glibc (Ubuntu's current release),
+# newer than Debian bookworm/trixie ship - so both the builder and the final
+# runtime image use Ubuntu to match. Go isn't published as an official
+# Ubuntu-based image, so it's installed directly from the upstream tarball.
+FROM ubuntu:latest AS build
+
+ARG GO_VERSION=1.27.4
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" -o /tmp/go.tar.gz \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz
+ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Set destination for COPY
 WORKDIR /build
@@ -36,14 +48,27 @@ RUN npm run build
 ## Deploy
 ###
 
-FROM alpine:latest
+# Must stay on the same glibc-compatible Ubuntu base as the builder stage
+# above - the dlopen'd whisper.cpp shared library's glibc version
+# requirement must be satisfied by the runtime image's libc too. Both the
+# server and worker Deployments run this same image (see
+# k8s-deployment/deployments/apps/local-podcasts.yaml), differing only by
+# command, so this affects both.
+FROM ubuntu:latest
 
 WORKDIR /app
+
+# ca-certificates: needed for HTTPS podcast feed/episode fetches.
+# libgomp1: OpenMP runtime required by the dlopen'd whisper.cpp shared
+# library (Kronk transcription, see cmd/worker).
+# libffi8: required by jupiterrider/ffi, Kronk's FFI bridge into the
+# dlopen'd whisper.cpp library.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libgomp1 libffi8 && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir /app/static
 
 # add new user
-RUN adduser -D app
+RUN useradd --create-home app
 
 
 COPY --from=build /build/local-podcasts /app/local-podcasts

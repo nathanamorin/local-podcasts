@@ -100,11 +100,13 @@ func (h *Handler) Register(e *echo.Echo) {
 	e.GET("/podcasts/:podcast_id/episodes", h.ListEpisodes)
 	e.GET("/podcasts/:podcast_id/episodes/:episode_id", h.GetEpisode)
 	e.GET("/podcasts/:podcast_id/episodes/:episode_id/stream", h.StreamEpisode)
+	e.GET("/podcasts/:podcast_id/episodes/:episode_id/transcript", h.GetEpisodeTranscript)
 
 	e.GET("/rss/all", h.RSSAll)
 
 	e.GET("/ads/candidates", h.ListAdCandidates)
 	e.POST("/ads/rescan-fingerprints", h.RescanFingerprints)
+	e.POST("/transcripts/rescan", h.RescanTranscripts)
 
 	e.GET("/openapi.json", h.OpenAPISpec)
 	e.GET("/doc", h.APIDocs)
@@ -323,6 +325,32 @@ func (h *Handler) GetEpisode(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, episode)
+}
+
+// GetEpisodeTranscript godoc
+// @Summary      Get an episode's transcript
+// @Description  Returns the whisper-generated transcript for an episode, including per-segment timestamps. Read-only - transcripts are only ever written by the internal job-completion path (see RegisterInternal).
+// @Tags         podcasts
+// @Produce      json
+// @Param        podcast_id  path      string  true  "Podcast ID"
+// @Param        episode_id  path      string  true  "Episode ID"
+// @Success      200  {object}  podcast.EpisodeTranscript
+// @Failure      404  {object}  map[string]string
+// @Router       /podcasts/{podcast_id}/episodes/{episode_id}/transcript [get]
+func (h *Handler) GetEpisodeTranscript(c echo.Context) error {
+	podcastID := c.Param("podcast_id")
+	episodeID := c.Param("episode_id")
+
+	transcript, err := podcast.GetEpisodeTranscript(h.db, podcastID, episodeID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return c.String(http.StatusNotFound, `{"error": "transcript not found"}`)
+		}
+		klog.Errorf("error getting transcript for episode %s: %s", episodeID, err)
+		return c.String(http.StatusInternalServerError, `{"error": "error getting transcript"}`)
+	}
+
+	return c.JSON(http.StatusOK, transcript)
 }
 
 // GetPodcastImage godoc

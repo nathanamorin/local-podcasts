@@ -29,6 +29,10 @@ const (
 	// indexed DB access to compare fingerprints, so it's claimed and run
 	// in-process by the main app itself (see detectAdsLoop in cmd/server).
 	JobTypeDetectAds JobType = "detect_ads"
+	// JobTypeTranscribe is a whisper (kronk/bucky) transcription of an
+	// already-downloaded episode's audio, claimed by the same CPU worker
+	// fleet as JobTypeFingerprint.
+	JobTypeTranscribe JobType = "transcribe"
 )
 
 // JobStatus is the lifecycle state of a Job.
@@ -45,6 +49,13 @@ const (
 // considered abandoned (e.g. the worker pod crashed or was evicted) and
 // requeued for another worker to pick up.
 const jobLeaseTimeout = 30 * time.Minute
+
+// transcribeJobLeaseTimeout is a longer lease for JobTypeTranscribe:
+// whisper inference on CPU (the "base" model) can take substantially
+// longer than jobLeaseTimeout for a long episode, and requeuing a job
+// that's still being legitimately worked on just duplicates the (slow) work
+// across two workers.
+const transcribeJobLeaseTimeout = 3 * time.Hour
 
 // jobMaxAttempts bounds retries before a job is marked failed instead of
 // requeued, so a permanently-broken episode doesn't retry forever.
@@ -180,6 +191,51 @@ func EnqueueFingerprintJob(db *gorm.DB, podcastID, episodeID string) error {
 	return err
 }
 
+// EnqueueTranscribeJob enqueues a job for a worker to transcribe an
+// already-downloaded episode's audio with whisper.
+func EnqueueTranscribeJob(db *gorm.DB, podcastID, episodeID string) error {
+	_, err := enqueueJob(db, JobTypeTranscribe, podcastID, episodeID)
+	return err
+}
+
+// EnqueueMissingTranscribeJobs scans for episodes that have a downloaded
+// audio file but no transcript yet (e.g. episodes downloaded before
+// transcription existed, or whose transcribe job previously failed), and
+// enqueues a transcribe job for each. Returns the number of jobs actually
+// enqueued. See EnqueueMissingFingerprintJobs's doc comment for why this is
+// two cheap indexed queries plus an in-memory set diff rather than a single
+// correlated-subquery NOT IN.
+func EnqueueMissingTranscribeJobs(db *gorm.DB) (int, error) {
+	var episodes []Episode
+	if err := db.Model(&Episode{}).Where("audio_file != ?", "").Find(&episodes).Error; err != nil {
+		return 0, fmt.Errorf("list downloaded episodes: %w", err)
+	}
+
+	var transcribedIDs []string
+	if err := db.Model(&EpisodeTranscript{}).Pluck("episode_id", &transcribedIDs).Error; err != nil {
+		return 0, fmt.Errorf("list episodes with transcripts: %w", err)
+	}
+	transcribed := make(map[string]struct{}, len(transcribedIDs))
+	for _, id := range transcribedIDs {
+		transcribed[id] = struct{}{}
+	}
+
+	enqueued := 0
+	for _, ep := range episodes {
+		if _, ok := transcribed[ep.Id]; ok {
+			continue
+		}
+		created, err := enqueueJob(db, JobTypeTranscribe, ep.PodcastID, ep.Id)
+		if err != nil {
+			return enqueued, fmt.Errorf("enqueue transcribe job for episode %s: %w", ep.Id, err)
+		}
+		if created {
+			enqueued++
+		}
+	}
+	return enqueued, nil
+}
+
 // EnqueueMissingFingerprintJobs scans for episodes that have a downloaded
 // audio file but no fingerprint data (e.g. episodes downloaded before
 // fingerprinting existed, or whose fingerprint job previously failed - note
@@ -261,9 +317,20 @@ func requeueStuckJobs(db *gorm.DB) error {
 	requeueStuckJobsLastRun = time.Now()
 	requeueStuckJobsMu.Unlock()
 
+	// Two queries (rather than one) because JobTypeTranscribe uses a
+	// longer lease (see jobLeaseTimeoutFor) - a single cutoff would either
+	// requeue in-flight transcriptions too eagerly or let stuck
+	// download/fingerprint jobs linger for hours.
 	cutoff := time.Now().Add(-jobLeaseTimeout)
+	if err := db.Model(&Job{}).
+		Where("status = ? AND claimed_at < ? AND type != ?", JobStatusProcessing, cutoff, JobTypeTranscribe).
+		Updates(map[string]interface{}{"status": JobStatusPending, "claimed_by": "", "claimed_at": nil}).Error; err != nil {
+		return err
+	}
+
+	transcribeCutoff := time.Now().Add(-transcribeJobLeaseTimeout)
 	return db.Model(&Job{}).
-		Where("status = ? AND claimed_at < ?", JobStatusProcessing, cutoff).
+		Where("status = ? AND claimed_at < ? AND type = ?", JobStatusProcessing, transcribeCutoff, JobTypeTranscribe).
 		Updates(map[string]interface{}{"status": JobStatusPending, "claimed_by": "", "claimed_at": nil}).Error
 }
 
@@ -332,6 +399,14 @@ type FingerprintChunk struct {
 	Hash     uint64  `json:"hash"`
 }
 
+// TranscribeJobResult is the payload a worker POSTs back on a successful
+// transcribe job.
+type TranscribeJobResult struct {
+	Language string              `json:"language"`
+	Text     string              `json:"text"`
+	Segments []TranscriptSegment `json:"segments"`
+}
+
 // CompleteJob records the outcome of a claimed job. On failure it requeues
 // the job (up to jobMaxAttempts) or marks it failed. On success it applies
 // the type-specific result (updating the Episode row for downloads, or
@@ -366,6 +441,10 @@ func CompleteJob(db *gorm.DB, jobID string, success bool, errMsg string, result 
 		if err := applyFingerprintResult(db, &job, result); err != nil {
 			return err
 		}
+	case JobTypeTranscribe:
+		if err := applyTranscribeResult(db, &job, result); err != nil {
+			return err
+		}
 	case JobTypeDetectAds:
 		// No result payload to apply - detectAdsForEpisode (run by the
 		// in-process loop that claims these jobs) writes AdSegment rows
@@ -384,6 +463,12 @@ func CompleteJob(db *gorm.DB, jobID string, success bool, errMsg string, result 
 	case JobTypeDownload:
 		if err := EnqueueFingerprintJob(db, job.PodcastID, job.EpisodeID); err != nil {
 			klog.Errorf("error enqueuing fingerprint job for episode %s: %s", job.EpisodeID, err)
+		}
+		// Transcription only depends on the downloaded audio (same as
+		// fingerprinting), not on fingerprinting itself, so it's enqueued
+		// in parallel rather than chained after the fingerprint job.
+		if err := EnqueueTranscribeJob(db, job.PodcastID, job.EpisodeID); err != nil {
+			klog.Errorf("error enqueuing transcribe job for episode %s: %s", job.EpisodeID, err)
 		}
 	case JobTypeFingerprint:
 		if _, err := enqueueJob(db, JobTypeDetectAds, job.PodcastID, job.EpisodeID); err != nil {
@@ -449,6 +534,25 @@ func applyFingerprintResult(db *gorm.DB, job *Job, result json.RawMessage) error
 	return db.CreateInBatches(rows, 200).Error
 }
 
+func applyTranscribeResult(db *gorm.DB, job *Job, result json.RawMessage) error {
+	var r TranscribeJobResult
+	if err := json.Unmarshal(result, &r); err != nil {
+		return fmt.Errorf("parse transcribe result: %w", err)
+	}
+
+	t := EpisodeTranscript{
+		PodcastID: job.PodcastID,
+		EpisodeID: job.EpisodeID,
+		Language:  r.Language,
+		Text:      r.Text,
+		Segments:  r.Segments,
+	}
+	if err := upsertEpisodeTranscript(db, &t); err != nil {
+		return fmt.Errorf("save transcript for episode %s: %w", job.EpisodeID, err)
+	}
+	return nil
+}
+
 // RefreshJobGauges recomputes the pending/processing/failed job-queue gauges
 // from current DB state. Run on a periodic background ticker (see
 // cmd/server/main.go) rather than incrementally or synchronously per
@@ -460,7 +564,7 @@ func applyFingerprintResult(db *gorm.DB, job *Job, result json.RawMessage) error
 // means a scrape is always just a fast in-memory read of the
 // last-computed gauge values.
 func RefreshJobGauges(db *gorm.DB) {
-	for _, jobType := range []JobType{JobTypeDownload, JobTypeFingerprint, JobTypeDetectAds} {
+	for _, jobType := range []JobType{JobTypeDownload, JobTypeFingerprint, JobTypeDetectAds, JobTypeTranscribe} {
 		metrics.PendingJobsGauge.WithLabelValues(string(jobType)).Set(countJobs(db, jobType, JobStatusPending))
 		metrics.ProcessingJobsGauge.WithLabelValues(string(jobType)).Set(countJobs(db, jobType, JobStatusProcessing))
 		metrics.FailedJobsGauge.WithLabelValues(string(jobType)).Set(countJobs(db, jobType, JobStatusFailed))

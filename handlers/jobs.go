@@ -65,7 +65,7 @@ func (h *Handler) ClaimJob(c echo.Context) error {
 
 	types := req.Types
 	if len(types) == 0 {
-		types = []podcast.JobType{podcast.JobTypeDownload, podcast.JobTypeFingerprint}
+		types = []podcast.JobType{podcast.JobTypeDownload, podcast.JobTypeFingerprint, podcast.JobTypeTranscribe}
 	}
 	// detect_ads jobs require direct DB access to compare fingerprints and
 	// are only ever claimed in-process by the main app itself (see

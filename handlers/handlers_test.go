@@ -141,6 +141,54 @@ func TestGetEpisode_Handler_NotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
+func TestGetEpisodeTranscript_Handler(t *testing.T) {
+	db := openTestDB(t)
+	seedPodcastWithEpisodes(t, db, "pod-1", 1)
+	require.NoError(t, db.Create(&podcast.EpisodeTranscript{
+		PodcastID: "pod-1",
+		EpisodeID: "pod-1-ep-000",
+		Language:  "en",
+		Text:      "hello world",
+		Segments:  podcast.TranscriptSegments{{Index: 0, StartMs: 0, EndMs: 500, Text: "hello world"}},
+	}).Error)
+
+	pw := podcast.NewPodcastWatcher(podcast.Config{}, db)
+	h := New(podcast.Config{}, &pw, db)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/podcasts/pod-1/episodes/pod-1-ep-000/transcript", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("podcast_id", "episode_id")
+	c.SetParamValues("pod-1", "pod-1-ep-000")
+
+	require.NoError(t, h.GetEpisodeTranscript(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var transcript podcast.EpisodeTranscript
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &transcript))
+	require.Equal(t, "hello world", transcript.Text)
+	require.Len(t, transcript.Segments, 1)
+}
+
+func TestGetEpisodeTranscript_Handler_NotFound(t *testing.T) {
+	db := openTestDB(t)
+	seedPodcastWithEpisodes(t, db, "pod-1", 1)
+
+	pw := podcast.NewPodcastWatcher(podcast.Config{}, db)
+	h := New(podcast.Config{}, &pw, db)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/podcasts/pod-1/episodes/pod-1-ep-000/transcript", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("podcast_id", "episode_id")
+	c.SetParamValues("pod-1", "pod-1-ep-000")
+
+	require.NoError(t, h.GetEpisodeTranscript(c))
+	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
 func TestGetPodcast_OmitsEpisodes(t *testing.T) {
 	db := openTestDB(t)
 	seedPodcastWithEpisodes(t, db, "pod-1", 3)
