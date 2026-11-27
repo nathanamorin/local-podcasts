@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Grommet, Box, Button, TextInput } from 'grommet'
+import { Grommet, Box, Button, Text, TextInput } from 'grommet'
 import { Previous } from 'grommet-icons'
 import { useNavigate } from "react-router-dom"
 import { theme } from './theme'
@@ -13,9 +13,17 @@ export function UserInfo() {
 
   const [currentClientToken, setCurrentClientToken] = useState("")
   const [isReading, setIsReading] = useState(false)
+  // Identity Istio/Pocket ID SSO injected for this request (X-Auth-Request-
+  // User), distinct from the device-paired clientToken below - this is who
+  // favorites are scoped to, not this QR-code pairing mechanism.
+  const [signedInUser, setSignedInUser] = useState(null)
 
   useEffect(() => {
     setCurrentClientToken(getClientToken())
+    fetch('/me')
+      .then(r => r.json())
+      .then(data => setSignedInUser(data.user_id))
+      .catch(() => setSignedInUser(null))
   }, [])
 
 
@@ -37,6 +45,11 @@ export function UserInfo() {
         <Box justify="center" align="start" justify="between" fill="horizontal" direction="row">
           <Button onClick={() => navigate(-1)} justify="start" icon={<Previous />}/>
         </Box>
+        {signedInUser && (
+          <Text size="small" color="text-weak" margin={{ bottom: 'small' }}>
+            Signed in as {signedInUser}
+          </Text>
+        )}
         <Box pad="small">
           <QRCode value={currentClientToken} pad="small" />
         </Box>

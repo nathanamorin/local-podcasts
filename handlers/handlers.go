@@ -91,6 +91,8 @@ func New(config podcast.Config, pw *podcast.PodcastWatcher, db *gorm.DB) *Handle
 
 // Register attaches all public-facing routes to the given Echo instance.
 func (h *Handler) Register(e *echo.Echo) {
+	e.Use(userIDMiddleware)
+
 	e.GET("/refresh", h.Refresh)
 
 	e.GET("/podcasts", h.ListPodcasts)
@@ -107,6 +109,11 @@ func (h *Handler) Register(e *echo.Echo) {
 	e.GET("/ads/candidates", h.ListAdCandidates)
 	e.POST("/ads/rescan-fingerprints", h.RescanFingerprints)
 	e.POST("/transcripts/rescan", h.RescanTranscripts)
+
+	e.GET("/me", h.GetCurrentUser)
+	e.GET("/me/favorites", h.ListFavorites)
+	e.PUT("/me/favorites/:podcast_id", h.AddFavorite)
+	e.DELETE("/me/favorites/:podcast_id", h.RemoveFavorite)
 
 	e.GET("/openapi.json", h.OpenAPISpec)
 	e.GET("/doc", h.APIDocs)

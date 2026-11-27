@@ -3,9 +3,6 @@ import { Link } from "react-router-dom"
 import { Grommet, Box, Heading, Paragraph, Button, TextInput, InfiniteScroll } from 'grommet'
 import { AddCircle, Star, User, Update } from 'grommet-icons'
 import { theme, background, cardBackground } from './theme'
-import { setClientInfo, getClientInfo, deleteClientInfo } from './utils'
-
-const starredPodcastsKey = "starred-podcasts"
 
 // How many podcasts the backend returns per /podcasts page.
 const PAGE_SIZE = 24
@@ -27,21 +24,14 @@ export function Index() {
   const hasMoreRef = useRef(true)
   const nextPageRef = useRef(1)
 
-  useEffect(async () => {
-    let starredPodcastsInit = await getClientInfo(starredPodcastsKey)
-    if (starredPodcastsInit !== null) {
-      try {
-        starredPodcastsInit = JSON.parse(starredPodcastsInit)
-      } catch {
-          await deleteClientInfo(starredPodcastsKey)
-          starredPodcastsInit = []
-      }
-    } else {
-      starredPodcastsInit = []
-    }
-
-    setStarredPodcasts(starredPodcastsInit)
-  
+  // Favorites are stored server-side, scoped to the authenticated user
+  // (X-Auth-Request-User, injected by Istio's Pocket ID SSO gate), so they
+  // follow the user across devices instead of being per-browser.
+  useEffect(() => {
+    fetch('/me/favorites')
+      .then(r => r.ok ? r.json() : { podcast_ids: [] })
+      .then(data => setStarredPodcasts(data.podcast_ids || []))
+      .catch(() => setStarredPodcasts([]))
   }, [])
 
   // Fetches the next page of podcasts from the server and appends it.
@@ -124,11 +114,12 @@ export function Index() {
                     const starIdx = newStars.indexOf(podcast.id)
                     if (starIdx === -1) {
                       newStars.push(podcast.id)
+                      fetch(`/me/favorites/${encodeURIComponent(podcast.id)}`, { method: 'PUT' })
                     } else {
                       newStars.splice(starIdx, 1)
+                      fetch(`/me/favorites/${encodeURIComponent(podcast.id)}`, { method: 'DELETE' })
                     }
                     setStarredPodcasts(newStars)
-                    setClientInfo(starredPodcastsKey, JSON.stringify(newStars))
                   }}/>
                 </Box>
                 <Link to={`/podcast/${podcast.id}`}
