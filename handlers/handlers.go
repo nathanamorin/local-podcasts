@@ -21,7 +21,52 @@ import (
 const UserDataPath = "user_data"
 
 type podcastList struct {
-	Podcasts []podcast.Podcast `json:"podcasts"`
+	Podcasts   []podcast.Podcast `json:"podcasts"`
+	Pagination pagination        `json:"pagination"`
+}
+
+type episodeList struct {
+	Episodes   []*podcast.Episode `json:"episodes"`
+	Pagination pagination         `json:"pagination"`
+}
+
+// pagination describes a single page of a paginated list response. HasMore
+// tells the client (e.g. a seamless-scroll UI) whether requesting Page+1 is
+// worthwhile, without it having to compute that from Total/PageSize itself.
+type pagination struct {
+	Page     int   `json:"page"`
+	PageSize int   `json:"page_size"`
+	Total    int64 `json:"total"`
+	HasMore  bool  `json:"has_more"`
+}
+
+// defaultPodcastPageSize/maxPodcastPageSize bound the page_size accepted by
+// the /podcasts list endpoint. The full podcast list is small enough to be
+// cached entirely in memory (see PodcastWatcher.podcastsCache), so pagination
+// here is just an in-memory slice of that cached list.
+const (
+	defaultPodcastPageSize = 20
+	maxPodcastPageSize     = 100
+)
+
+// parsePageParams reads page/page_size query params (1-based page, clamped
+// to [1, maxPageSize]), defaulting page_size to defaultPageSize when absent
+// or invalid.
+func parsePageParams(c echo.Context, defaultPageSize, maxPageSize int) (page, pageSize int) {
+	page = 1
+	if v, err := strconv.Atoi(c.QueryParam("page")); err == nil && v > 0 {
+		page = v
+	}
+
+	pageSize = defaultPageSize
+	if v, err := strconv.Atoi(c.QueryParam("page_size")); err == nil && v > 0 {
+		pageSize = v
+	}
+	if pageSize > maxPageSize {
+		pageSize = maxPageSize
+	}
+
+	return page, pageSize
 }
 
 // addPodcastRequest documents the expected AddPodcast request body.
@@ -52,6 +97,8 @@ func (h *Handler) Register(e *echo.Echo) {
 	e.POST("/podcasts", h.AddPodcast)
 	e.GET("/podcasts/:podcast_id", h.GetPodcast)
 	e.GET("/podcasts/:podcast_id/image", h.GetPodcastImage)
+	e.GET("/podcasts/:podcast_id/episodes", h.ListEpisodes)
+	e.GET("/podcasts/:podcast_id/episodes/:episode_id", h.GetEpisode)
 	e.GET("/podcasts/:podcast_id/episodes/:episode_id/stream", h.StreamEpisode)
 
 	e.GET("/rss/all", h.RSSAll)
@@ -116,9 +163,11 @@ func (h *Handler) Refresh(c echo.Context) error {
 
 // ListPodcasts godoc
 // @Summary      List subscribed podcasts
-// @Description  Returns all subscribed podcasts with episode lists omitted.
+// @Description  Returns a page of subscribed podcasts (episode lists omitted), newest-episode-first. Supports page/page_size query params for seamless-scroll pagination.
 // @Tags         podcasts
 // @Produce      json
+// @Param        page       query     int  false  "Page number, 1-based (default 1)"
+// @Param        page_size  query     int  false  "Podcasts per page (default 20, max 100)"
 // @Success      200  {object}  podcastList
 // @Failure      500  {object}  map[string]string
 // @Router       /podcasts [get]
@@ -133,7 +182,27 @@ func (h *Handler) ListPodcasts(c echo.Context) error {
 		podcasts[idx].Episodes = nil
 	}
 
-	return c.JSON(http.StatusOK, podcastList{Podcasts: podcasts})
+	page, pageSize := parsePageParams(c, defaultPodcastPageSize, maxPodcastPageSize)
+	total := len(podcasts)
+
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+
+	return c.JSON(http.StatusOK, podcastList{
+		Podcasts: podcasts[start:end],
+		Pagination: pagination{
+			Page:     page,
+			PageSize: pageSize,
+			Total:    int64(total),
+			HasMore:  end < total,
+		},
+	})
 }
 
 // AddPodcast godoc
@@ -172,7 +241,7 @@ func (h *Handler) AddPodcast(c echo.Context) error {
 
 // GetPodcast godoc
 // @Summary      Get a podcast
-// @Description  Returns a single subscribed podcast, including its episode list.
+// @Description  Returns a single subscribed podcast's metadata. The episode list is omitted - use GET /podcasts/{podcast_id}/episodes for a paginated episode list, or GET /podcasts/{podcast_id}/episodes/{episode_id} for a single episode.
 // @Tags         podcasts
 // @Produce      json
 // @Param        podcast_id  path      string  true  "Podcast ID"
@@ -186,7 +255,74 @@ func (h *Handler) GetPodcast(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, `{"error": "error getting podcast"}`)
 	}
 
+	// The full episode list can be thousands of entries for some podcasts;
+	// clients fetch it in pages via ListEpisodes instead.
+	podcastData.Episodes = nil
+
 	return c.JSON(http.StatusOK, podcastData)
+}
+
+// defaultEpisodePageSize/maxEpisodePageSize mirror podcast.DefaultEpisodePageSize/
+// podcast.MaxEpisodePageSize, just re-declared here so this file doesn't need
+// to reach into the podcast package for a couple of constants used only for
+// query-param parsing.
+const (
+	defaultEpisodePageSize = podcast.DefaultEpisodePageSize
+	maxEpisodePageSize     = podcast.MaxEpisodePageSize
+)
+
+// ListEpisodes godoc
+// @Summary      List a podcast's episodes
+// @Description  Returns a page of a podcast's episodes, newest-first. Supports page/page_size query params for seamless-scroll pagination.
+// @Tags         podcasts
+// @Produce      json
+// @Param        podcast_id  path      string  true  "Podcast ID"
+// @Param        page        query     int     false  "Page number, 1-based (default 1)"
+// @Param        page_size   query     int     false  "Episodes per page (default 20, max 100)"
+// @Success      200  {object}  episodeList
+// @Failure      500  {object}  map[string]string
+// @Router       /podcasts/{podcast_id}/episodes [get]
+func (h *Handler) ListEpisodes(c echo.Context) error {
+	podcastID := c.Param("podcast_id")
+	page, pageSize := parsePageParams(c, defaultEpisodePageSize, maxEpisodePageSize)
+
+	episodes, total, err := h.pw.ListEpisodesPage(podcastID, page, pageSize)
+	if err != nil {
+		klog.Errorf("error listing episodes for podcast %s: %s", podcastID, err)
+		return c.String(http.StatusInternalServerError, `{"error": "error listing episodes"}`)
+	}
+
+	return c.JSON(http.StatusOK, episodeList{
+		Episodes: episodes,
+		Pagination: pagination{
+			Page:     page,
+			PageSize: pageSize,
+			Total:    total,
+			HasMore:  int64(page*pageSize) < total,
+		},
+	})
+}
+
+// GetEpisode godoc
+// @Summary      Get an episode
+// @Description  Returns a single episode's metadata, without requiring the full episode list.
+// @Tags         podcasts
+// @Produce      json
+// @Param        podcast_id  path      string  true  "Podcast ID"
+// @Param        episode_id  path      string  true  "Episode ID"
+// @Success      200  {object}  podcast.Episode
+// @Failure      404  {object}  map[string]string
+// @Router       /podcasts/{podcast_id}/episodes/{episode_id} [get]
+func (h *Handler) GetEpisode(c echo.Context) error {
+	podcastID := c.Param("podcast_id")
+	episodeID := c.Param("episode_id")
+
+	episode, err := h.pw.GetEpisode(podcastID, episodeID)
+	if err != nil {
+		return c.String(http.StatusNotFound, `{"error": "episode not found"}`)
+	}
+
+	return c.JSON(http.StatusOK, episode)
 }
 
 // GetPodcastImage godoc

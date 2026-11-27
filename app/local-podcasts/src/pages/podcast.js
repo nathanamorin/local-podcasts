@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Grommet, Box, Drop, InfiniteScroll, Button, Text, Heading, Paragraph, TextInput } from 'grommet'
 import { Play, Previous } from 'grommet-icons'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { theme, background, cardBackground } from './theme'
 import { getClientInfo, setClientInfo, deleteClientInfo } from './utils'
 import { usePlayer } from '../PlayerContext'
+
+// How many episodes the backend returns per /podcasts/{id}/episodes page.
+const PAGE_SIZE = 50
 
 
 export function Podcast() {
@@ -20,14 +23,41 @@ export function Podcast() {
 
   const playedEpisodesKey = `played-episodes-${podcastId}`
 
+  // Mirrors in-flight/has-more state in refs so loadMoreEpisodes - called
+  // from InfiniteScroll's onMore - always sees the latest value rather than
+  // one captured by an earlier render's closure.
+  const loadingRef = useRef(false)
+  const hasMoreRef = useRef(true)
+  const nextPageRef = useRef(1)
+
+  // Fetches the next page of this podcast's episodes and appends it.
+  const loadMoreEpisodes = useCallback(() => {
+    if (loadingRef.current || !hasMoreRef.current) {
+      return
+    }
+    loadingRef.current = true
+    const page = nextPageRef.current
+
+    fetch(`/podcasts/${podcastId}/episodes?page=${page}&page_size=${PAGE_SIZE}`)
+      .then(data => data.json())
+      .then(({ episodes: newEpisodes, pagination }) => {
+        setEpisodes(prev => [...prev, ...newEpisodes])
+        hasMoreRef.current = pagination.has_more
+        nextPageRef.current = page + 1
+      })
+      .catch(err => console.log(err))
+      .finally(() => {
+        loadingRef.current = false
+      })
+  }, [podcastId])
+
   useEffect(async () => {
     fetch(`/podcasts/${podcastId}`)
       .then(data => data.json())
-      .then(data => {
-        setPodcast(data)
-        setEpisodes(data.episodes || [])
-      })
+      .then(data => setPodcast(data))
       .catch(err => console.log(err))
+
+    loadMoreEpisodes()
 
     const data = await getClientInfo(playedEpisodesKey)
     if (data != null) {
@@ -118,7 +148,7 @@ export function Podcast() {
         />
 
         <Box fill="horizontal" pad={{ top: 'medium' }}>
-          <InfiniteScroll items={searchedEpisodes} pad="small">
+          <InfiniteScroll items={searchedEpisodes} pad="small" onMore={loadMoreEpisodes}>
             {(episode) => (
               <Box
                 key={episode.id}

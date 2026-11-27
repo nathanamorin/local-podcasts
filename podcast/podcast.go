@@ -67,7 +67,7 @@ func ValidateAudioFile(filePath string) error {
 }
 
 type Episode struct {
-	PodcastID        string `json:"-" gorm:"primaryKey"`
+	PodcastID        string `json:"-" gorm:"primaryKey;index:idx_episodes_podcast_publish,priority:1"`
 	Id               string `json:"id" gorm:"primaryKey"`
 	Name             string `json:"name"`
 	Description      string `json:"description"`
@@ -75,7 +75,7 @@ type Episode struct {
 	RSSAudioURL      string `json:"rss_audio_url"`
 	Length           int64  `json:"audio_length_sec"`
 	ReadOrder        int    `json:"read_order"`
-	PublishTimestamp int64  `json:"publish_timestamp"`
+	PublishTimestamp int64  `json:"publish_timestamp" gorm:"index:idx_episodes_podcast_publish,priority:2"`
 }
 
 type Podcast struct {
@@ -246,6 +246,63 @@ func (pw *PodcastWatcher) GetPodcast(id string) (*Podcast, error) {
 
 	return &podcast, nil
 
+}
+
+// DefaultEpisodePageSize and MaxEpisodePageSize bound the page_size accepted
+// by ListEpisodesPage (and the /podcasts/{id}/episodes handler built on top
+// of it), so a client can't force an unbounded-size query against a podcast
+// with thousands of episodes.
+const (
+	DefaultEpisodePageSize = 20
+	MaxEpisodePageSize     = 100
+)
+
+// GetEpisode fetches a single episode by its (podcast ID, episode ID) key,
+// without loading the podcast's full episode list. This backs the
+// /podcasts/{id}/episodes/{id} endpoint, used by the player page to resolve
+// a deep-linked episode cheaply.
+func (pw *PodcastWatcher) GetEpisode(podcastID, episodeID string) (*Episode, error) {
+	var ep Episode
+	result := pw.db.Where("podcast_id = ? AND id = ?", podcastID, episodeID).First(&ep)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &ep, nil
+}
+
+// ListEpisodesPage returns a single page of a podcast's episodes, sorted
+// newest-first (matching GetPodcast/RefreshPodcastMetadataCache's
+// ordering), along with the total episode count for that podcast. Unlike
+// GetPodcast, this queries the database directly (ordering/pagination done
+// in SQL) rather than loading every episode into memory, since some
+// podcasts have thousands of episodes.
+func (pw *PodcastWatcher) ListEpisodesPage(podcastID string, page, pageSize int) ([]*Episode, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = DefaultEpisodePageSize
+	}
+	if pageSize > MaxEpisodePageSize {
+		pageSize = MaxEpisodePageSize
+	}
+
+	var total int64
+	if err := pw.db.Model(&Episode{}).Where("podcast_id = ?", podcastID).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var episodes []*Episode
+	result := pw.db.Where("podcast_id = ?", podcastID).
+		Order("publish_timestamp desc, read_order desc").
+		Limit(pageSize).
+		Offset((page - 1) * pageSize).
+		Find(&episodes)
+	if result.Error != nil {
+		return nil, 0, result.Error
+	}
+
+	return episodes, total, nil
 }
 
 func (pw *PodcastWatcher) ListPodcasts() ([]Podcast, error) {

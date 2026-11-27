@@ -26,14 +26,15 @@ export function PlayPodcast() {
       .then(res => res.json())
       .then(data => {
         setPodcast(data)
-        const eps = data.episodes || []
-        const ep = eps.find(e => e.id === episodeId)
-        if (ep) {
-          setEpisode(ep)
-        } else {
-          window.location.href = '/'
-        }
+        return fetch(`/podcasts/${podcastId}/episodes/${episodeId}`)
       })
+      .then(res => {
+        if (!res.ok) {
+          throw new Error(`episode fetch failed: ${res.status}`)
+        }
+        return res.json()
+      })
+      .then(ep => setEpisode(ep))
       .catch(() => { window.location.href = '/' })
   }, [])
 

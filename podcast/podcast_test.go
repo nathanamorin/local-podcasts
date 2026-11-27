@@ -244,6 +244,106 @@ func TestGetPodcast_NotFound(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// ---------------------------------------------------------------------------
+// GetEpisode & ListEpisodesPage
+// ---------------------------------------------------------------------------
+
+func TestGetEpisode(t *testing.T) {
+	db := openTestDB(t)
+	config := tempConfig(t)
+	pw := NewPodcastWatcher(config, db)
+
+	p := mustParseRss(t, testData, "https://test123")
+	savePodcast(t, p, config, db)
+
+	got, err := pw.GetEpisode(p.Id, p.Episodes[0].Id)
+	require.NoError(t, err)
+	assert.Equal(t, p.Episodes[0].Id, got.Id)
+	assert.Equal(t, p.Episodes[0].Name, got.Name)
+}
+
+func TestGetEpisode_NotFound(t *testing.T) {
+	db := openTestDB(t)
+	config := tempConfig(t)
+	pw := NewPodcastWatcher(config, db)
+
+	p := mustParseRss(t, testData, "https://test123")
+	savePodcast(t, p, config, db)
+
+	_, err := pw.GetEpisode(p.Id, "doesnotexist")
+	assert.Error(t, err)
+}
+
+// seedEpisodes inserts n synthetic episodes directly for an existing
+// podcast, with strictly decreasing publish timestamps (episode 0 newest),
+// to exercise pagination/ordering without needing an n-episode RSS fixture.
+func seedEpisodes(t *testing.T, db *gorm.DB, podcastID string, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		ep := Episode{
+			PodcastID:        podcastID,
+			Id:               fmt.Sprintf("seed-ep-%03d", i),
+			Name:             fmt.Sprintf("Seed Episode %d", i),
+			PublishTimestamp: int64(1_700_000_000 - i), // decreasing: 0 is newest
+		}
+		require.NoError(t, db.Create(&ep).Error)
+	}
+}
+
+func TestListEpisodesPage(t *testing.T) {
+	db := openTestDB(t)
+	config := tempConfig(t)
+	pw := NewPodcastWatcher(config, db)
+
+	p := mustParseRss(t, testData, "https://test123")
+	savePodcast(t, p, config, db)
+	seedEpisodes(t, db, p.Id, 25)
+
+	// 2 from the RSS fixture + 25 seeded = 27 total.
+	page1, total, err := pw.ListEpisodesPage(p.Id, 1, 10)
+	require.NoError(t, err)
+	assert.Equal(t, int64(27), total)
+	require.Len(t, page1, 10)
+	// Newest-first: seeded timestamps (~1.7e9) are all newer than the RSS
+	// fixture's latest episode (timestamp 1623165635), so seeded episodes
+	// sort before it.
+	assert.Equal(t, "seed-ep-000", page1[0].Id)
+	assert.Equal(t, "seed-ep-009", page1[9].Id)
+
+	page2, total2, err := pw.ListEpisodesPage(p.Id, 2, 10)
+	require.NoError(t, err)
+	assert.Equal(t, int64(27), total2)
+	require.Len(t, page2, 10)
+	assert.Equal(t, "seed-ep-010", page2[0].Id)
+
+	page3, total3, err := pw.ListEpisodesPage(p.Id, 3, 10)
+	require.NoError(t, err)
+	assert.Equal(t, int64(27), total3)
+	// Remaining: 27 - 20 = 7.
+	assert.Len(t, page3, 7)
+}
+
+func TestListEpisodesPage_ClampsPageSize(t *testing.T) {
+	db := openTestDB(t)
+	config := tempConfig(t)
+	pw := NewPodcastWatcher(config, db)
+
+	p := mustParseRss(t, testData, "https://test123")
+	savePodcast(t, p, config, db)
+	seedEpisodes(t, db, p.Id, 5)
+
+	episodes, _, err := pw.ListEpisodesPage(p.Id, 1, MaxEpisodePageSize+1000)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(episodes), MaxEpisodePageSize)
+
+	// page < 1 and pageSize < 1 should fall back to sane defaults rather
+	// than erroring or computing a negative offset.
+	episodes, total, err := pw.ListEpisodesPage(p.Id, 0, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), total)
+	assert.Len(t, episodes, 7)
+}
+
 func TestGetEpisodeAudioFilePath(t *testing.T) {
 	db := openTestDB(t)
 	config := tempConfig(t)
