@@ -1658,3 +1658,6 @@ a.eyebrow:hover { color: var(--accent); }
   .scrubber .thumb { transform: translateY(-50%) scale(1); }
   .np .scrubber .thumb { width: 16px; height: 16px; margin-left: -8px; }
 }
+
+/* Star marking favorite shows in episode eyebrows (Latest Episodes). */
+.fav-star { color: #f5b400; flex-shrink: 0; vertical-align: -1px; margin-right: 4px; }

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { usePlayer, getEpisodeProgress } from '../player/PlayerContext'
 import { Artwork, Popover, MenuItem, usePopover } from './primitives'
 import { PlayPill } from './Controls'
-import { AddToQueueIcon, MoreIcon, PlayNextIcon, CheckCircleIcon, CircleIcon, NotesIcon, PodcastIcon, CheckIcon } from './Icons'
+import { AddToQueueIcon, MoreIcon, PlayNextIcon, CheckCircleIcon, CircleIcon, NotesIcon, PodcastIcon, CheckIcon, StarIcon } from './Icons'
 import { formatPublishDate, htmlToText } from '../lib/format'
 
 export function episodePath(podcastId, episodeId) {
@@ -41,7 +41,7 @@ export function EpisodeMenu({ podcast, episode, anchor, onClose, serverPositions
 // Episode row anatomy (Apple Podcasts style): date · duration eyebrow, 2-line
 // title, 2-line description, then a play pill with live progress and
 // queue / overflow actions.
-function EpisodeRowImpl({ podcast, episode, showArt = false, serverPositions, descLines = 2 }) {
+function EpisodeRowImpl({ podcast, episode, showArt = false, serverPositions, descLines = 2, favorite = false }) {
   const { current, progress, enqueue } = usePlayer()
   const menu = usePopover()
   const isCurrent = current?.episode.id === episode.id
@@ -58,6 +58,7 @@ function EpisodeRowImpl({ podcast, episode, showArt = false, serverPositions, de
       )}
       <div className="ep-body">
         <div className="ep-meta">
+          {favorite && <StarIcon size={11} filled className="fav-star" aria-label="Favorite" />}
           {showArt && <><span className="show-name">{podcast.name}</span><span className="dot-sep" /></>}
           <span style={{ flexShrink: 0 }}>{formatPublishDate(episode.publish_timestamp)}</span>
         </div>

@@ -41,7 +41,7 @@ function ContinueCard({ entry, prog }) {
 
 // Phone layout for Latest Episodes: compact swipeable cards instead of
 // full-height rows, so the Shows grid is reachable on the first screen.
-function LatestCard({ podcast }) {
+function LatestCard({ podcast, favorite }) {
   const episode = podcast.latest_episode
   return (
     <div className="continue-card latest-card">
@@ -49,7 +49,10 @@ function LatestCard({ podcast }) {
         <Artwork podcastId={podcast.id} />
       </Link>
       <div className="meta">
-        <div className="show clamp-1">{podcast.name} · {formatPublishDate(episode.publish_timestamp)}</div>
+        <div className="show clamp-1">
+          {favorite && <StarIcon size={11} filled className="fav-star" aria-label="Favorite" />}
+          {podcast.name} · {formatPublishDate(episode.publish_timestamp)}
+        </div>
         <Link to={episodePath(podcast.id, episode.id)} state={{ podcast, episode }} className="title clamp-2">{episode.name}</Link>
         <div style={{ marginTop: 4 }}><PlayPill podcast={podcast} episode={episode} /></div>
       </div>
@@ -114,10 +117,16 @@ export function Library() {
     .filter(x => x.prog && !x.prog.done && x.prog.p > 15)
     .slice(0, 10), [history, progress])
 
+  // Favorites' newest episodes float to the top (newest first), followed by
+  // everything else by recency.
   const latest = useMemo(() => podcasts
     .filter(p => p.latest_episode)
-    .sort((a, b) => b.latest_episode.publish_timestamp - a.latest_episode.publish_timestamp)
-    .slice(0, 6), [podcasts])
+    .sort((a, b) => {
+      const fa = favorites.has(a.id), fb = favorites.has(b.id)
+      if (fa !== fb) return fa ? -1 : 1
+      return b.latest_episode.publish_timestamp - a.latest_episode.publish_timestamp
+    })
+    .slice(0, 8), [podcasts, favorites])
 
   const shows = useMemo(() => {
     let list = podcasts
@@ -171,12 +180,12 @@ export function Library() {
             <div className="section-head"><h2 className="section-title">Latest Episodes</h2></div>
             {isMobile ? (
               <div className="shelf">
-                {latest.map(p => <LatestCard key={p.latest_episode.id} podcast={p} />)}
+                {latest.map(p => <LatestCard key={p.latest_episode.id} podcast={p} favorite={favorites.has(p.id)} />)}
               </div>
             ) : (
               <ul className="episode-list latest-grid">
                 {latest.map(p => (
-                  <EpisodeRow key={p.latest_episode.id} podcast={p} episode={p.latest_episode} showArt descLines={1} />
+                  <EpisodeRow key={p.latest_episode.id} podcast={p} episode={p.latest_episode} showArt descLines={1} favorite={favorites.has(p.id)} />
                 ))}
               </ul>
             )}
