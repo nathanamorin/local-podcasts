@@ -1,41 +1,58 @@
-import React from 'react'
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
-import { Grommet, Box } from 'grommet'
-import { theme, background } from './pages/theme'
-import { PlayerProvider } from './PlayerContext'
-import { PlayerBar, PLAYER_HEIGHT } from './components/PlayerBar'
-import { QueueDrawer } from './components/QueueDrawer'
-import { Index } from './pages/index'
-import { UserInfo } from './pages/user-info'
-import { Podcast } from './pages/podcast'
-import { PlayPodcast } from './pages/podcast/play'
-import { AddPodcast } from './pages/podcast/add'
-import NotFound from './pages/404'
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
+import { PlayerProvider, usePlayer } from './player/PlayerContext'
+import { LibraryProvider } from './lib/LibraryContext'
+import { Sidebar, PlayerBar, QueuePanel, MobileDock, Toast } from './components/Shell'
+import { NowPlaying } from './components/NowPlaying'
+import { Library } from './pages/Library'
+import { Show } from './pages/Show'
+import { Episode } from './pages/Episode'
+import { UpNextPage, AddPodcast, Account, NotFound } from './pages/misc'
+import { useEffect, useRef } from 'react'
 
+function ScrollToTop() {
+  const { pathname } = useLocation()
+  const first = useRef(true)
+  useEffect(() => {
+    if (first.current) { first.current = false; return }
+    document.querySelector('.main')?.scrollTo(0, 0)
+  }, [pathname])
+  return null
+}
 
-function App() {
+function Shell() {
+  const { queueOpen } = usePlayer()
   return (
-    <PlayerProvider>
-      <Grommet full theme={theme} background={background}>
-        <Router>
-          {/* Main scrollable content — padded so PlayerBar doesn't overlap */}
-          <Box fill overflow="auto" style={{ paddingBottom: PLAYER_HEIGHT }}>
-            <Routes>
-              <Route path="/" element={<Index />} />
-              <Route path="/user-info" element={<UserInfo />} />
-              <Route path="/podcast/add" element={<AddPodcast />} />
-              <Route path="/podcast/:podcastId" element={<Podcast />} />
-              <Route path="/podcast/:podcastId/episode/:episodeId" element={<PlayPodcast />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Box>
-          <PlayerBar />
-          <QueueDrawer />
-        </Router>
-      </Grommet>
-    </PlayerProvider>
+    <div className={`app ${queueOpen ? 'queue-open' : ''}`}>
+      <Sidebar />
+      <main className="main" id="main">
+        <ScrollToTop />
+        <Routes>
+          <Route path="/" element={<Library />} />
+          <Route path="/up-next" element={<UpNextPage />} />
+          <Route path="/user-info" element={<Account />} />
+          <Route path="/podcast/add" element={<AddPodcast />} />
+          <Route path="/podcast/:podcastId" element={<Show />} />
+          <Route path="/podcast/:podcastId/episode/:episodeId" element={<Episode />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </main>
+      <QueuePanel />
+      <PlayerBar />
+      <MobileDock />
+      <NowPlaying />
+      <Toast />
+    </div>
   )
 }
 
-export default App
-
+export default function App() {
+  return (
+    <Router>
+      <LibraryProvider>
+        <PlayerProvider>
+          <Shell />
+        </PlayerProvider>
+      </LibraryProvider>
+    </Router>
+  )
+}

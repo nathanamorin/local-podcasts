@@ -1,8 +1,14 @@
 import React from 'react'
 import ReactDOM from 'react-dom'
 import App from './App'
+import './styles/app.css'
+import { applyTheme } from './pages/misc'
+import { safeGet } from './lib/storage'
 import reportWebVitals from './reportWebVitals'
 import * as serviceWorkerRegistration from './serviceWorkerRegistration'
+
+// Apply a saved light/dark override before first paint.
+applyTheme(safeGet('theme'))
 
 ReactDOM.render(
   <React.StrictMode>
