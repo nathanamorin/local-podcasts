@@ -31,7 +31,7 @@ function mergeRanges(ranges) {
 }
 
 export function PlayerBar() {
-  const { currentPodcast, currentEpisode, queue, setShowQueue, playNext } = usePlayer()
+  const { currentPodcast, currentEpisode, queue, setShowQueue, playNext, registerSeekHandler } = usePlayer()
   const { isAvailable, isConnected, isPaused, requestSession, loadMedia, playOrPause } = useChromecast()
   const playerRef = useRef(null)
   const [adSkipEnabled, setAdSkipEnabledState] = useState(getAdSkipEnabled())
@@ -76,6 +76,21 @@ export function PlayerBar() {
     const el = playerRef.current?.container?.current?.querySelector('.rhap_progress-bar')
     if (el) setProgressBarEl(el)
   }, [isConnected, currentEpisode?.id])
+
+  // Expose a way for other pages (e.g. the transcript view) to jump
+  // playback to a given time. Only supported for local playback, since
+  // useChromecast doesn't currently expose a seek control.
+  useEffect(() => {
+    if (isConnected) {
+      registerSeekHandler(null)
+      return
+    }
+    registerSeekHandler((seconds) => {
+      const audio = playerRef.current?.audio?.current
+      if (audio) audio.currentTime = seconds
+    })
+    return () => registerSeekHandler(null)
+  }, [isConnected, currentEpisode?.id, registerSeekHandler])
 
   function toggleAdSkip(enabled) {
     setAdSkipEnabledState(enabled)

@@ -7,6 +7,7 @@ export function PlayerProvider({ children }) {
   const [currentEpisode, setCurrentEpisode] = useState(null)
   const [queue, setQueue] = useState([]) // [{ podcast, episode }]
   const [showQueue, setShowQueue] = useState(false)
+  const [seekHandler, setSeekHandler] = useState(null)
 
   const playNow = useCallback((podcast, episode) => {
     setCurrentPodcast(podcast)
@@ -50,6 +51,19 @@ export function PlayerProvider({ children }) {
     })
   }, [])
 
+  // Lets PlayerBar (which owns the actual <audio> element) expose a way
+  // for other pages (e.g. the transcript view) to jump playback to a
+  // specific time, without those pages needing direct access to the
+  // player's internal ref. Wrapped in a setter fn since React's useState
+  // would otherwise try to call a raw function value as an updater.
+  const registerSeekHandler = useCallback((fn) => {
+    setSeekHandler(() => fn)
+  }, [])
+
+  const seekTo = useCallback((seconds) => {
+    seekHandler?.(seconds)
+  }, [seekHandler])
+
   return (
     <PlayerContext.Provider value={{
       currentPodcast,
@@ -63,6 +77,9 @@ export function PlayerProvider({ children }) {
       moveUp,
       moveDown,
       playNext,
+      registerSeekHandler,
+      seekTo,
+      canSeek: !!seekHandler,
     }}>
       {children}
     </PlayerContext.Provider>

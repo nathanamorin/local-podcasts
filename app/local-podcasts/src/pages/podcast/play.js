@@ -5,15 +5,27 @@ import { Previous, Play, Add } from 'grommet-icons'
 import { background, cardBackground, theme } from '../theme'
 import { usePlayer } from '../../PlayerContext'
 
+// Formats a millisecond offset as m:ss (or h:mm:ss for long episodes).
+function formatTimestamp(ms) {
+  const totalSeconds = Math.floor(ms / 1000)
+  const h = Math.floor(totalSeconds / 3600)
+  const m = Math.floor((totalSeconds % 3600) / 60)
+  const s = totalSeconds % 60
+  const mm = h > 0 ? String(m).padStart(2, '0') : String(m)
+  const ss = String(s).padStart(2, '0')
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
+}
 
 export function PlayPodcast() {
   const location = useLocation()
   const navigate = useNavigate()
   const { podcastId, episodeId } = useParams()
-  const { currentEpisode, playNow, addToQueue } = usePlayer()
+  const { currentEpisode, playNow, addToQueue, seekTo, canSeek } = usePlayer()
 
   const [episode, setEpisode] = useState(null)
   const [podcast, setPodcast] = useState(null)
+  // undefined = still loading, null = no transcript available, object = loaded
+  const [transcript, setTranscript] = useState(undefined)
 
   useEffect(async () => {
     if (location.state?.episode && location.state?.podcast) {
@@ -37,6 +49,19 @@ export function PlayPodcast() {
       .then(ep => setEpisode(ep))
       .catch(() => { window.location.href = '/' })
   }, [])
+
+  // Transcription happens asynchronously in the background and may not
+  // have run yet for this episode, so a 404 here just means "not available
+  // yet" rather than an error - render nothing instead of failing.
+  useEffect(() => {
+    setTranscript(undefined)
+    let cancelled = false
+    fetch(`/podcasts/${podcastId}/episodes/${episodeId}/transcript`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (!cancelled) setTranscript(data) })
+      .catch(() => { if (!cancelled) setTranscript(null) })
+    return () => { cancelled = true }
+  }, [podcastId, episodeId])
 
   if (!episode || !podcast) {
     return (
@@ -103,6 +128,33 @@ export function PlayPodcast() {
           <Paragraph size="small" textAlign="center" fill>
             {episode.description.replace(/(<([^>]+)>)/gi, '')}
           </Paragraph>
+
+          {transcript && transcript.segments?.length > 0 && (
+            <Box fill="horizontal" margin={{ top: 'medium' }}>
+              <Heading level="4" size="small" margin={{ top: 'none', bottom: 'xsmall' }}>
+                Transcript
+              </Heading>
+              <Box gap="xsmall">
+                {transcript.segments.map(seg => (
+                  <Box
+                    key={seg.index}
+                    direction="row"
+                    gap="small"
+                    pad="xsmall"
+                    round="xsmall"
+                    onClick={isThisPlaying && canSeek ? () => seekTo(seg.start_ms / 1000) : undefined}
+                    style={isThisPlaying && canSeek ? { cursor: 'pointer' } : undefined}
+                    title={isThisPlaying && canSeek ? 'Jump to this point in the episode' : undefined}
+                  >
+                    <Text size="xsmall" color="text-weak" style={{ flexShrink: 0, minWidth: '3em' }}>
+                      {formatTimestamp(seg.start_ms)}
+                    </Text>
+                    <Text size="small">{seg.text}</Text>
+                  </Box>
+                ))}
+              </Box>
+            </Box>
+          )}
         </Box>
 
         {/* Action buttons pinned to bottom of card */}
