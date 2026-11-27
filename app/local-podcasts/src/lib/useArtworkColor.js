@@ -27,7 +27,12 @@ function sample(img) {
     r += pr * w; g += pg * w; b += pb * w; total += w
   }
   if (!total) return null
-  return { r: Math.round(r / total), g: Math.round(g / total), b: Math.round(b / total) }
+  r /= total; g /= total; b /= total
+  // Cap brightness so white text on tinted surfaces stays legible even for
+  // mostly-white artwork (WCAG-ish: keep the brightest channel <= ~150).
+  const max = Math.max(r, g, b)
+  if (max > 150) { const k = 150 / max; r *= k; g *= k; b *= k }
+  return { r: Math.round(r), g: Math.round(g), b: Math.round(b) }
 }
 
 // Returns an "r, g, b" string (for use inside rgb()/rgba()) derived from

@@ -22,6 +22,8 @@ export function NowPlaying() {
   const isMobile = useIsMobile()
   const menu = usePopover()
   const sideRef = useRef(null)
+  const rootRef = useRef(null)
+  const scrollRef = useRef(null)
   const tint = useArtworkColor(current ? imageUrl(current.podcast.id) : null)
   const transcript = useTranscript(current?.podcast.id, current?.episode.id)
 
@@ -38,6 +40,61 @@ export function NowPlaying() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nowPlayingOpen])
 
+  // Swipe down to dismiss (iOS sheet behavior): only when the sheet's content
+  // is scrolled to the top, so normal scrolling is unaffected. Listeners are
+  // attached natively with passive: false so the drag can suppress the
+  // browser's own overscroll.
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root || !nowPlayingOpen) return
+    let startY = null
+    let dy = 0
+    const onStart = (e) => {
+      if (e.touches.length !== 1) return
+      if ((scrollRef.current?.scrollTop || 0) > 0) return
+      if (e.target.closest('.scrubber, .np-side-body, .sheet, .popover')) return
+      startY = e.touches[0].clientY
+      dy = 0
+    }
+    const onMove = (e) => {
+      if (startY === null) return
+      dy = e.touches[0].clientY - startY
+      if (dy <= 0) { root.style.transform = ''; return }
+      e.preventDefault()
+      root.classList.add('dragging')
+      root.style.transform = `translateY(${dy}px)`
+    }
+    const onEnd = () => {
+      if (startY === null) return
+      startY = null
+      root.classList.remove('dragging')
+      if (dy > Math.min(160, window.innerHeight * 0.18)) {
+        root.classList.add('snapping')
+        root.style.transform = 'translateY(100%)'
+        setTimeout(() => {
+          root.classList.remove('snapping')
+          root.style.transform = ''
+          setNowPlayingOpen(false)
+        }, 280)
+      } else if (dy > 0) {
+        root.classList.add('snapping')
+        root.style.transform = ''
+        setTimeout(() => root.classList.remove('snapping'), 300)
+      }
+      dy = 0
+    }
+    root.addEventListener('touchstart', onStart, { passive: true })
+    root.addEventListener('touchmove', onMove, { passive: false })
+    root.addEventListener('touchend', onEnd)
+    root.addEventListener('touchcancel', onEnd)
+    return () => {
+      root.removeEventListener('touchstart', onStart)
+      root.removeEventListener('touchmove', onMove)
+      root.removeEventListener('touchend', onEnd)
+      root.removeEventListener('touchcancel', onEnd)
+    }
+  }, [nowPlayingOpen, setNowPlayingOpen])
+
   // Default to Up Next when there's no transcript to show.
   useEffect(() => {
     if (transcript === null && tab === 'transcript') setTab('queue')
@@ -53,7 +110,7 @@ export function NowPlaying() {
   }
 
   return (
-    <div className={`np ${closing ? 'closing' : ''}`} style={tint ? { '--tint': tint } : undefined} role="dialog" aria-modal="true" aria-label="Now Playing">
+    <div ref={rootRef} className={`np ${closing ? 'closing' : ''}`} style={tint ? { '--tint': tint } : undefined} role="dialog" aria-modal="true" aria-label="Now Playing">
       <div className="np-bg"><img src={imageUrl(podcast.id)} alt="" /></div>
 
       <div className="np-top">
@@ -71,7 +128,7 @@ export function NowPlaying() {
         {menu.isOpen && <EpisodeMenu podcast={podcast} episode={episode} anchor={menu.anchor} onClose={() => { menu.close() }} />}
       </div>
 
-      <div className="np-scroll">
+      <div className="np-scroll" ref={scrollRef}>
         <div className="np-layout">
           <div className="np-main">
             <Artwork podcastId={podcast.id} className={`np-art ${isPlaying ? '' : 'paused'}`} alt={podcast.name} />

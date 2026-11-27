@@ -112,7 +112,7 @@ export function SleepControl({ placement, className = 'icon-btn' }) {
       </button>
       {pop.isOpen && (
         <Popover anchor={pop.anchor} onClose={pop.close} placement={placement} title="Sleep Timer">
-          <div className="menu-label">Sleep timer{countdown ? ` · ${countdown}` : ''}</div>
+          {countdown && <div className="menu-label">Ends in {countdown}</div>}
           {[5, 10, 15, 30, 45, 60].map(m => (
             <MenuItem key={m} onClick={() => choose(m)}>{m} minutes</MenuItem>
           ))}

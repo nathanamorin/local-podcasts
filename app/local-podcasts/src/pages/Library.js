@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useLibrary } from '../lib/LibraryContext'
 import { usePlayer } from '../player/PlayerContext'
-import { Artwork } from '../components/primitives'
+import { Artwork, useIsMobile } from '../components/primitives'
+import { PlayPill } from '../components/Controls'
 import { TopBar } from '../components/TopBar'
 import { EpisodeRow, episodePath } from '../components/EpisodeRow'
 import { SearchIcon, CloseIcon, RefreshIcon, PlusIcon, StarIcon, PodcastIcon, PlayIcon, PauseIcon } from '../components/Icons'
@@ -38,15 +39,36 @@ function ContinueCard({ entry, prog }) {
   )
 }
 
+// Phone layout for Latest Episodes: compact swipeable cards instead of
+// full-height rows, so the Shows grid is reachable on the first screen.
+function LatestCard({ podcast }) {
+  const episode = podcast.latest_episode
+  return (
+    <div className="continue-card latest-card">
+      <Link to={`/podcast/${podcast.id}`} tabIndex={-1} aria-hidden="true">
+        <Artwork podcastId={podcast.id} />
+      </Link>
+      <div className="meta">
+        <div className="show clamp-1">{podcast.name} · {formatPublishDate(episode.publish_timestamp)}</div>
+        <Link to={episodePath(podcast.id, episode.id)} state={{ podcast, episode }} className="title clamp-2">{episode.name}</Link>
+        <div style={{ marginTop: 4 }}><PlayPill podcast={podcast} episode={episode} /></div>
+      </div>
+    </div>
+  )
+}
+
 function ShowTile({ podcast }) {
   const { isFavorite, toggleFavorite } = useLibrary()
+  const { progress } = usePlayer()
   const fav = isFavorite(podcast.id)
   const latest = podcast.latest_episode
-  const isNew = latest && Date.now() / 1000 - latest.publish_timestamp < 2 * DAY
+  // Unplayed-and-recent marker (a dot, not a badge: most active shows
+  // publish daily, so a loud badge on every tile carried no signal).
+  const isNew = latest && !progress[latest.id] && Date.now() / 1000 - latest.publish_timestamp < 3 * DAY
   return (
     <Link to={`/podcast/${podcast.id}`} className="show-tile">
       <Artwork podcastId={podcast.id} className="round-lg" alt="" />
-      {isNew && <span className="new-dot">New</span>}
+      {isNew && <span className="new-dot" title="New episode" aria-label="New episode" />}
       <button
         type="button"
         className={`fav ${fav ? 'on' : ''}`}
@@ -111,6 +133,7 @@ export function Library() {
   }, [podcasts, filter, sort, query, favorites])
 
   const searching = query.length > 0
+  const isMobile = useIsMobile()
 
   return (
     <>
@@ -146,11 +169,17 @@ export function Library() {
         {!searching && latest.length > 0 && (
           <section className="section">
             <div className="section-head"><h2 className="section-title">Latest Episodes</h2></div>
-            <ul className="episode-list latest-grid">
-              {latest.map(p => (
-                <EpisodeRow key={p.latest_episode.id} podcast={p} episode={p.latest_episode} showArt descLines={1} />
-              ))}
-            </ul>
+            {isMobile ? (
+              <div className="shelf">
+                {latest.map(p => <LatestCard key={p.latest_episode.id} podcast={p} />)}
+              </div>
+            ) : (
+              <ul className="episode-list latest-grid">
+                {latest.map(p => (
+                  <EpisodeRow key={p.latest_episode.id} podcast={p} episode={p.latest_episode} showArt descLines={1} />
+                ))}
+              </ul>
+            )}
           </section>
         )}
 

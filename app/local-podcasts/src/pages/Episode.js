@@ -74,7 +74,7 @@ export function Episode() {
                 <PlayPill podcast={podcast} episode={episode} large />
                 {!isCurrent && (
                   <button type="button" className="btn btn-secondary" style={{ height: 44 }} onClick={() => enqueue(podcast, episode)}>
-                    {queued ? <CheckIcon size={18} /> : <AddToQueueIcon size={18} />} {queued ? 'In Up Next' : 'Up Next'}
+                    {queued ? <CheckIcon size={18} /> : <AddToQueueIcon size={18} />} <span className="hide-narrow">{queued ? 'In Up Next' : 'Up Next'}</span>
                   </button>
                 )}
                 <button type="button" className="icon-btn filled" style={{ width: 44, height: 44 }} onClick={menu.open} aria-label="More actions">
