@@ -1,38 +1,59 @@
 import React from 'react'
 import { useNavigate } from "react-router-dom"
-import { Grommet, Box, Button, TextInput } from 'grommet'
-import { Previous } from 'grommet-icons'
-import { theme } from '../theme'
+import { Box, Button, Heading, Text, TextInput } from 'grommet'
+import { Header } from '../../components/Header'
 
 
 export function AddPodcast() {
 
   const navigate = useNavigate()
 
-  const [value, setValue] = React.useState('');
+  const [value, setValue] = React.useState('')
+  const [submitting, setSubmitting] = React.useState(false)
+  const [error, setError] = React.useState(null)
+
+  function submit() {
+    if (!value.trim()) return
+    setSubmitting(true)
+    setError(null)
+    fetch(`/podcasts`, {
+      method: 'POST',
+      body: JSON.stringify({ rss_url: value }),
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Could not add that podcast — check the RSS URL and try again.')
+        navigate('/')
+      })
+      .catch(err => {
+        setSubmitting(false)
+        setError(err.message)
+      })
+  }
 
   return (
-    <Grommet full theme={theme}>
-      <Box fill="vertical" overflow="auto" align="center" flex="grow" pad="medium">
-      <Box justify="center" align="start" justify="between" fill="horizontal" direction="row">
-          <Button onClick={() => navigate(-1)} justify="start" icon={<Previous />}/>
-        </Box>
-        <TextInput placeholder="RSS URL" value={value} onChange={event => setValue(event.target.value)} />
-        <Box align="center" justify="center" pad="medium">
-          <Button label="Submit" onClick={() => {
-            fetch(`/podcasts`, {
-              method: 'POST',
-              body: JSON.stringify({ rss_url: value })
-            })
-              .then(data => {
-                window.location.href = "/"
-              })
-              .catch(err => {
-                alert(err)
-              })
-          }} />
+    <Box fill>
+      <Header title="Add Podcast" />
+      <Box align="center" pad="large">
+        <Box gap="small" width={{ max: '420px' }} fill="horizontal">
+          <Heading level="3" margin="none">Add a podcast</Heading>
+          <Text size="small" color="text-weak">
+            Paste the podcast's RSS feed URL to subscribe.
+          </Text>
+          <TextInput
+            placeholder="https://example.com/feed.xml"
+            value={value}
+            onChange={event => setValue(event.target.value)}
+            onKeyDown={e => e.key === 'Enter' && submit()}
+          />
+          {error && <Text size="small" color="status-critical">{error}</Text>}
+          <Button
+            primary
+            label={submitting ? 'Adding…' : 'Add Podcast'}
+            disabled={submitting || !value.trim()}
+            onClick={submit}
+          />
         </Box>
       </Box>
-    </Grommet>
+    </Box>
   )
 }

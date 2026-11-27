@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
-import { Box, Button, CheckBox, Text } from 'grommet'
+import { Box, Button, CheckBox, ResponsiveContext, Text } from 'grommet'
 import { Play, Pause, Next } from 'grommet-icons'
 import { Cast } from 'react-feather'
 import AudioPlayer from 'react-h5-audio-player'
-import 'react-h5-audio-player/lib/styles.css'
+import '../pages/podcast/custom-player.scss'
 import { usePlayer } from '../PlayerContext'
 import { useChromecast } from '../pages/podcast/useChromecast'
 import { getClientInfo, setClientInfo, getAdSkipEnabled, setAdSkipEnabled } from '../pages/utils'
@@ -33,6 +33,8 @@ function mergeRanges(ranges) {
 export function PlayerBar() {
   const { currentPodcast, currentEpisode, queue, setShowQueue, playNext, registerSeekHandler } = usePlayer()
   const { isAvailable, isConnected, isPaused, requestSession, loadMedia, playOrPause } = useChromecast()
+  const size = useContext(ResponsiveContext)
+  const compact = size === 'small'
   const playerRef = useRef(null)
   const [adSkipEnabled, setAdSkipEnabledState] = useState(getAdSkipEnabled())
   const [adRanges, setAdRanges] = useState([])
@@ -208,6 +210,7 @@ export function PlayerBar() {
         ]}
         hasDefaultKeyBindings={false}
         ref={playerRef}
+        customVolumeControls={compact ? [] : undefined}
         style={{ background: 'transparent', boxShadow: 'none' }}
       />
     )
@@ -257,7 +260,7 @@ export function PlayerBar() {
             round="xsmall"
             flex={{ shrink: 0 }}
             background={{
-              color: 'light-2',
+              color: 'background-contrast',
               image: `url('/podcasts/${currentPodcast.id}/image')`,
               size: 'cover',
             }}
@@ -293,13 +296,13 @@ export function PlayerBar() {
             toggle
             checked={adSkipEnabled}
             onChange={e => toggleAdSkip(e.target.checked)}
-            label={<Text size="xsmall" color="text-weak">Skip Ads</Text>}
+            label={compact ? undefined : <Text size="xsmall" color="text-weak">Skip Ads</Text>}
             title={adSkipEnabled ? 'Ad skipping enabled - click to disable' : 'Ad skipping disabled - click to enable'}
           />
           {isAvailable && (
             <Button
               plain
-              icon={<Cast size={18} color={isConnected ? '#4285F4' : theme.global.colors['text-weak']?.dark || '#ccc'} />}
+              icon={<Cast size={18} color={isConnected ? '#4285F4' : theme.global.colors['text-weak']?.dark || '#9a9ea3'} />}
               onClick={requestSession}
               title={isConnected ? 'Connected to Cast device' : 'Cast to device'}
             />
@@ -308,7 +311,7 @@ export function PlayerBar() {
             plain
             onClick={() => setShowQueue(v => !v)}
             title="Show queue"
-            style={{ padding: '4px 8px', fontSize: '12px', color: '#ccc' }}
+            style={{ padding: '4px 8px', fontSize: '12px', color: '#9a9ea3' }}
             label={queue.length > 0 ? `Queue (${queue.length})` : 'Queue'}
           />
         </Box>

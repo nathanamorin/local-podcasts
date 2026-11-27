@@ -1,7 +1,7 @@
-$rhap_theme-color: #EEEEEE !default;
-$rhap_background-color: #181A1B !default;
-$rhap_bar-color: #7d7d7d !default;
-$rhap_time-color: #EEEEEE !default;
+$rhap_theme-color: #ff5a3c !default;
+$rhap_background-color: transparent !default;
+$rhap_bar-color: #3a3d42 !default;
+$rhap_time-color: #9a9ea3 !default;
 $rhap_font-family: inherit !default;
 
 .rhap_container {
@@ -13,7 +13,6 @@ $rhap_font-family: inherit !default;
   width: 100%;
   padding: 10px 15px;
   background-color: $rhap_background-color;
-  box-shadow: 0 0 3px 0 rgba(0, 0, 0, 0.2);
 
   &:focus:not(:focus-visible) {
     outline: 0;

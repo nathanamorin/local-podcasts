@@ -1,4 +1,5 @@
-import { Box, Button, Layer, Text, Heading } from 'grommet'
+import { useContext } from 'react'
+import { Box, Button, Layer, ResponsiveContext, Text, Heading } from 'grommet'
 import { Close, Up, Down, Trash } from 'grommet-icons'
 import { usePlayer } from '../PlayerContext'
 import { cardBackground } from '../pages/theme'
@@ -15,6 +16,8 @@ export function QueueDrawer() {
     moveDown,
     playNow,
   } = usePlayer()
+  const size = useContext(ResponsiveContext)
+  const compact = size === 'small'
 
   if (!showQueue) return null
 
@@ -27,7 +30,7 @@ export function QueueDrawer() {
       animate
     >
       <Box
-        width="360px"
+        width={compact ? '100vw' : '360px'}
         fill="vertical"
         background={cardBackground}
         overflow="auto"
@@ -66,7 +69,7 @@ export function QueueDrawer() {
                 round="xsmall"
                 flex={{ shrink: 0 }}
                 background={{
-                  color: 'light-2',
+                  color: 'background-contrast',
                   image: `url('/podcasts/${currentPodcast.id}/image')`,
                   size: 'cover',
                 }}
@@ -125,7 +128,7 @@ export function QueueDrawer() {
                     round="xsmall"
                     flex={{ shrink: 0 }}
                     background={{
-                      color: 'light-2',
+                      color: 'background-contrast',
                       image: `url('/podcasts/${podcast.id}/image')`,
                       size: 'cover',
                     }}

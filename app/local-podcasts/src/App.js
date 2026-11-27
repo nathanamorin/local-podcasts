@@ -1,7 +1,7 @@
 import React from 'react'
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { Grommet, Box } from 'grommet'
-import { theme } from './pages/theme'
+import { theme, background } from './pages/theme'
 import { PlayerProvider } from './PlayerContext'
 import { PlayerBar, PLAYER_HEIGHT } from './components/PlayerBar'
 import { QueueDrawer } from './components/QueueDrawer'
@@ -10,21 +10,23 @@ import { UserInfo } from './pages/user-info'
 import { Podcast } from './pages/podcast'
 import { PlayPodcast } from './pages/podcast/play'
 import { AddPodcast } from './pages/podcast/add'
+import NotFound from './pages/404'
 
 
 function App() {
   return (
     <PlayerProvider>
-      <Grommet full theme={theme}>
+      <Grommet full theme={theme} background={background}>
         <Router>
           {/* Main scrollable content — padded so PlayerBar doesn't overlap */}
-          <Box fill style={{ paddingBottom: PLAYER_HEIGHT }}>
+          <Box fill overflow="auto" style={{ paddingBottom: PLAYER_HEIGHT }}>
             <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/user-info" element={<UserInfo />} />
               <Route path="/podcast/add" element={<AddPodcast />} />
               <Route path="/podcast/:podcastId" element={<Podcast />} />
               <Route path="/podcast/:podcastId/episode/:episodeId" element={<PlayPodcast />} />
+              <Route path="*" element={<NotFound />} />
             </Routes>
           </Box>
           <PlayerBar />
@@ -36,3 +38,4 @@ function App() {
 }
 
 export default App
+

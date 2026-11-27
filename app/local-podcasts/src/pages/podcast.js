@@ -1,18 +1,22 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Grommet, Box, Drop, InfiniteScroll, Button, Text, Heading, Paragraph, TextInput } from 'grommet'
-import { Play, Previous } from 'grommet-icons'
-import { Link, useParams, useNavigate } from 'react-router-dom'
-import { theme, background, cardBackground } from './theme'
+import React, { useContext, useState, useEffect, useRef, useCallback } from 'react'
+import { Box, Drop, InfiniteScroll, Button, Text, Heading, ResponsiveContext, TextInput } from 'grommet'
+import { Play, Search as SearchIcon } from 'grommet-icons'
+import { Link, useParams } from 'react-router-dom'
+import { Header } from '../components/Header'
 import { getClientInfo, setClientInfo, deleteClientInfo } from './utils'
 import { usePlayer } from '../PlayerContext'
 
 // How many episodes the backend returns per /podcasts/{id}/episodes page.
 const PAGE_SIZE = 50
 
+function stripHtml(html) {
+  return (html || '').replace(/(<([^>]+)>)/gi, '')
+}
 
 export function Podcast() {
   const { podcastId } = useParams()
-  const navigate = useNavigate()
+  const size = useContext(ResponsiveContext)
+  const compact = size === 'small'
   const { currentEpisode, playNow, addToQueue } = usePlayer()
 
   const [podcast, setPodcast] = useState(null)
@@ -114,75 +118,119 @@ export function Podcast() {
   })
 
   return (
-    <Grommet theme={theme}>
-      <Box align="center" justify="center" pad="small" background={background}
-        flex={false} direction="row" wrap overflow="auto">
-
-        <Box justify="center" align="start" fill="horizontal">
-          <Button onClick={() => navigate(-1)} justify="start" icon={<Previous />} />
-        </Box>
+    <Box fill>
+      <Header title={podcast?.name || ''} />
 
         {podcast && (
-          <Box align="center" pad="small" background={cardBackground} round="medium"
-            margin="medium" direction="column" alignSelf="center"
-            animation={{ type: 'fadeIn', size: 'medium' }}>
-            <Box align="center" justify="center" pad="xsmall" margin="xsmall">
-              <Box align="center" justify="center"
-                background={{ dark: false, color: 'light-2', image: `url('/podcasts/${podcast.id}/image')` }}
-                round="xsmall" margin="medium" fill="vertical" pad="xlarge" />
-              <Heading level="2" size="medium" margin="xsmall" textAlign="center">
+          <Box
+            direction={compact ? 'column' : 'row'}
+            align={compact ? 'center' : 'start'}
+            gap="medium"
+            pad="medium"
+            flex={{ shrink: 0 }}
+          >
+            <Box
+              width="160px"
+              height="160px"
+              round="small"
+              flex={{ shrink: 0 }}
+              background={{ color: 'background-contrast', image: `url('/podcasts/${podcast.id}/image')`, size: 'cover' }}
+            />
+            <Box gap="xsmall" align={compact ? 'center' : 'start'} style={{ maxWidth: '640px' }}>
+              <Heading level="2" margin="none" textAlign={compact ? 'center' : 'start'}>
                 {podcast.name}
               </Heading>
-              <Paragraph size="small" margin="medium" textAlign="center">
-                {podcast.description.replace(/(<([^>]+)>)/gi, '')}
-              </Paragraph>
+              <Text size="small" color="text-weak" textAlign="start">
+                {stripHtml(podcast.description)}
+              </Text>
             </Box>
           </Box>
         )}
 
-        <TextInput
-          placeholder="Search"
-          value={searchText}
-          onChange={event => setSearchText(event.target.value)}
-          focusIndicator={false}
-        />
+        <Box
+          direction="row"
+          align="center"
+          gap="small"
+          pad={{ horizontal: 'medium', bottom: 'small' }}
+          flex={{ shrink: 0 }}
+        >
+          <Heading level="4" margin="none">Episodes</Heading>
+          <Box flex />
+          <Box
+            direction="row"
+            align="center"
+            gap="xsmall"
+            background="background-contrast"
+            round="small"
+            pad={{ horizontal: 'small' }}
+            width={{ max: '260px' }}
+          >
+            <SearchIcon size="small" color="text-xweak" />
+            <TextInput
+              placeholder="Search episodes"
+              value={searchText}
+              onChange={event => setSearchText(event.target.value)}
+              plain
+              focusIndicator={false}
+            />
+          </Box>
+        </Box>
 
-        <Box fill="horizontal" pad={{ top: 'medium' }}>
-          <InfiniteScroll items={searchedEpisodes} pad="small" onMore={loadMoreEpisodes}>
+        <Box pad={{ horizontal: 'medium', bottom: 'large' }} flex="grow" overflow="auto">
+          <InfiniteScroll items={searchedEpisodes} onMore={loadMoreEpisodes}>
             {(episode) => (
               <Box
                 key={episode.id}
+                direction="row"
                 align="center"
-                justify="between"
-                fill="horizontal"
-                direction="row-responsive"
-                margin={{ top: 'xxsmall' }}
-                background={`linear-gradient(to right, ${theme.global.colors['grey!']} ${episode.percentPlayed}% , ${theme.global.colors['dark-2']}  ${episode.percentPlayed}% 100%)`}
+                gap="small"
+                round="small"
+                pad={{ vertical: 'xsmall', horizontal: 'xsmall' }}
+                hoverIndicator="background-contrast"
+                style={{ position: 'relative' }}
               >
-                <Box align="center" justify="start" direction="row" flex>
-                  <Button
-                    icon={<Play />}
-                    size="large"
-                    onClick={e => handlePlayClick(episode, e.currentTarget)}
+                {episode.percentPlayed > 0 && (
+                  <Box
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      bottom: 0,
+                      height: '2px',
+                      width: `${episode.percentPlayed}%`,
+                      background: '#ff5a3c',
+                      borderRadius: '2px',
+                    }}
                   />
-                  <Link
-                    to={`/podcast/${podcastId}/episode/${episode.id}`}
-                    state={{ podcast, episode, episodes: searchedEpisodes }}
-                    style={{ textDecoration: 'none', flex: 1, overflow: 'hidden' }}
-                  >
-                    <Box align="start" justify="start" direction="column" pad={{ horizontal: 'xsmall' }}>
-                      <Text color="text" truncate>
-                        {episode.name}
+                )}
+                <Button
+                  icon={<Play size="medium" />}
+                  onClick={e => handlePlayClick(episode, e.currentTarget)}
+                  plain
+                  hoverIndicator
+                  style={{ padding: '8px', borderRadius: '999px', flexShrink: 0 }}
+                />
+                <Link
+                  to={`/podcast/${podcastId}/episode/${episode.id}`}
+                  state={{ podcast, episode, episodes: searchedEpisodes }}
+                  style={{ textDecoration: 'none', flex: 1, overflow: 'hidden' }}
+                >
+                  <Box direction={compact ? 'column' : 'row'} align={compact ? 'start' : 'center'} gap={compact ? '2px' : 'small'}>
+                    <Text color="text" truncate style={{ display: 'block', maxWidth: '100%' }}>
+                      {episode.name}
+                    </Text>
+                    {compact && (
+                      <Text color="text-weak" size="xsmall">
+                        {(new Date(episode.publish_timestamp * 1000)).toLocaleDateString()}
                       </Text>
-                    </Box>
-                  </Link>
-                </Box>
+                    )}
+                  </Box>
+                </Link>
 
-                <Box align="center" justify="end" direction="row" flex={{ shrink: 0 }}>
-                  <Text color="text-weak" size="small" margin={{ right: 'small' }}>
+                {!compact && (
+                  <Text color="text-weak" size="small" style={{ flexShrink: 0 }}>
                     {(new Date(episode.publish_timestamp * 1000)).toLocaleDateString()}
                   </Text>
-                </Box>
+                )}
               </Box>
             )}
           </InfiniteScroll>
@@ -215,8 +263,6 @@ export function Podcast() {
             </Box>
           </Drop>
         )}
-
       </Box>
-    </Grommet>
   )
 }

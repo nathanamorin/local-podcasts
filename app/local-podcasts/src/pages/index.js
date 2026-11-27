@@ -1,12 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Link } from "react-router-dom"
-import { Grommet, Box, Heading, Paragraph, Button, TextInput, InfiniteScroll } from 'grommet'
+import { Box, Button, InfiniteScroll, Text } from 'grommet'
 import { AddCircle, Star, User, Update } from 'grommet-icons'
-import { theme, background, cardBackground } from './theme'
+import { Header } from '../components/Header'
+import { cardBackground } from './theme'
 
 // How many podcasts the backend returns per /podcasts page.
 const PAGE_SIZE = 24
 
+// Minimum card width used by the responsive grid — the grid reflows its
+// column count to whatever fits, rather than relying on a fixed wrap
+// layout that left large gaps/odd centering at in-between viewport widths.
+const CARD_MIN_WIDTH = '170px'
 
 export function Index() {
 
@@ -61,13 +66,10 @@ export function Index() {
     loadMore()
   }, [])
 
-  // starred/starColor are derived client-side from the loaded podcasts and
-  // the starred-ids list, rather than re-fetched from the server, so toggling
-  // a star doesn't disturb the paginated load state.
-  const displayed = podcasts.map(p => {
-    const starred = starredPodcasts.includes(p.id)
-    return { ...p, starred, starColor: starred ? "gold" : "text" }
-  })
+  // starred is derived client-side from the loaded podcasts and the
+  // starred-ids list, rather than re-fetched from the server, so toggling a
+  // star doesn't disturb the paginated load state.
+  const displayed = podcasts.map(p => ({ ...p, starred: starredPodcasts.includes(p.id) }))
 
   let results;
   if (searchText !== "") {
@@ -80,67 +82,101 @@ export function Index() {
     })
   }
 
+  function toggleStar(podcast) {
+    const starred = starredPodcasts.includes(podcast.id)
+    const newStars = starred
+      ? starredPodcasts.filter(id => id !== podcast.id)
+      : [...starredPodcasts, podcast.id]
+    setStarredPodcasts(newStars)
+    fetch(`/me/favorites/${encodeURIComponent(podcast.id)}`, { method: starred ? 'DELETE' : 'PUT' })
+  }
+
   return (
-    <Grommet full theme={theme} background={background}>
-      <Box>
-        <Box align="center" justify="end" direction="row" fill="horizontal" pad="small">
-            <TextInput
-              placeholder="Search"
-              value={searchText}
-              onChange={event => setSearchText(event.target.value)}
-              outline="none"
-            />
-            <Link to="/podcast/add">
-              <Button icon={<AddCircle />} margin="none" />
-            </Link>
-            <Link to="/user-info">
-              <Button icon={<User />} margin="none" />
-            </Link>
-            <Button icon={<Update />} margin="none" onClick={()=>{
-              fetch(`/refresh`)
-              .then((response) => response.json())
-              .then((re) => console.log(re))
-            }}/>
+    <Box fill>
+      <Header
+        title="Podcasts"
+        back={false}
+        search={{ value: searchText, onChange: e => setSearchText(e.target.value), placeholder: 'Search your podcasts' }}
+        actions={[
+          <Link key="add" to="/podcast/add"><Button icon={<AddCircle />} tip="Add podcast" plain hoverIndicator style={{ padding: '8px', borderRadius: '8px' }} /></Link>,
+          <Link key="user" to="/user-info"><Button icon={<User />} tip="Account" plain hoverIndicator style={{ padding: '8px', borderRadius: '8px' }} /></Link>,
+          <Button
+            key="refresh"
+            icon={<Update />}
+            tip="Refresh feeds"
+            plain
+            hoverIndicator
+            style={{ padding: '8px', borderRadius: '8px' }}
+            onClick={() => fetch(`/refresh`).then(r => r.json()).then(re => console.log(re))}
+          />,
+        ]}
+      />
+
+      {results.length === 0 ? (
+        <Box align="center" justify="center" pad="large" flex>
+          <Text color="text-weak">
+            {searchText ? 'No podcasts match your search.' : 'No podcasts yet — add one to get started.'}
+          </Text>
         </Box>
-      </Box>
-      <Box justify="center">
-        <Box fill="horizontal" direction="row" align="center" justify="center" wrap={true}>
-          <InfiniteScroll items={results} step={8} onMore={loadMore}>
+      ) : (
+        <Box
+          pad={{ horizontal: 'medium', top: 'medium', bottom: 'large' }}
+          flex="grow"
+          overflow="auto"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(auto-fill, minmax(${CARD_MIN_WIDTH}, 1fr))`,
+            gap: '20px',
+            alignItems: 'start',
+          }}
+        >
+          <InfiniteScroll items={results} step={12} onMore={loadMore}>
             {(podcast) => (
-              <Box key={podcast.id} width={{max: "300px"}} align="center" pad="small" background={cardBackground} round="medium" margin="medium" direction="column" alignSelf="center" animation={{ "type": "fadeIn", "size": "medium" }}>
-                <Box justify="end" alignSelf="end" basis="0px" flex="shrink">
-                  <Button icon={<Star color={podcast.starColor}/>} size="large" style={{transform: "translateY(100%)"}} onClick={e => {
-                    const newStars = [...starredPodcasts]
-                    const starIdx = newStars.indexOf(podcast.id)
-                    if (starIdx === -1) {
-                      newStars.push(podcast.id)
-                      fetch(`/me/favorites/${encodeURIComponent(podcast.id)}`, { method: 'PUT' })
-                    } else {
-                      newStars.splice(starIdx, 1)
-                      fetch(`/me/favorites/${encodeURIComponent(podcast.id)}`, { method: 'DELETE' })
-                    }
-                    setStarredPodcasts(newStars)
-                  }}/>
-                </Box>
-                <Link to={`/podcast/${podcast.id}`}
-                  style={{ textDecoration: 'none' }}
+              <Link
+                key={podcast.id}
+                to={`/podcast/${podcast.id}`}
+                style={{ textDecoration: 'none', display: 'block' }}
+              >
+                <Box
+                  background={cardBackground}
+                  round="medium"
+                  overflow="hidden"
+                  animation={{ type: 'fadeIn', size: 'medium' }}
+                  className="podcast-card"
                 >
-                  <Box align="center" justify="center" pad="xsmall" margin="xsmall">
-                    <Box align="center" justify="center" background={{ "dark": false, "color": "light-2", "image": `url('/podcasts/${podcast.id}/image')` }} round="xsmall" margin="medium" fill="vertical" pad="xlarge" />
-                    <Heading level="2" size="medium" margin="xsmall" textAlign="center" color="text">
-                      {podcast.name}
-                    </Heading>
-                    <Paragraph size="small" margin="medium" textAlign="center" color="text">
-                      Latest: {podcast.latest_episode.name} {(new Date(podcast.latest_episode.publish_timestamp * 1000)).toLocaleDateString()}
-                    </Paragraph>
+                  <Box style={{ position: 'relative', aspectRatio: '1 / 1' }}>
+                    <Box
+                      fill
+                      background={{ color: 'background-contrast', image: `url('/podcasts/${podcast.id}/image')`, size: 'cover' }}
+                    />
+                    <Button
+                      icon={<Star size="small" color={podcast.starred ? '#ff5a3c' : 'white'} fill={podcast.starred ? '#ff5a3c' : 'none'} />}
+                      onClick={e => { e.preventDefault(); toggleStar(podcast) }}
+                      plain
+                      style={{
+                        position: 'absolute',
+                        top: '6px',
+                        right: '6px',
+                        padding: '6px',
+                        borderRadius: '999px',
+                        background: 'rgba(0,0,0,0.45)',
+                      }}
+                    />
                   </Box>
-                </Link>
-              </Box>
+                  <Box pad={{ horizontal: 'small', vertical: 'small' }} gap="2px">
+                    <Text size="small" weight="bold" color="text" truncate>
+                      {podcast.name}
+                    </Text>
+                    <Text size="xsmall" color="text-weak" truncate>
+                      {podcast.latest_episode?.name}
+                    </Text>
+                  </Box>
+                </Box>
+              </Link>
             )}
           </InfiniteScroll>
         </Box>
-      </Box>
-
-    </Grommet>
+      )}
+    </Box>
   )
 }
