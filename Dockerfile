@@ -37,7 +37,7 @@ RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -
 RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -a -installsuffix cgo -o local-podcasts-worker ./cmd/worker
 RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -a -installsuffix cgo -o local-podcasts-migrate-sqlite-to-postgres ./cmd/migrate-sqlite-to-postgres
 
-FROM node:16-alpine as app
+FROM node:26-alpine as app
 
 WORKDIR '/app'
 COPY ./app/local-podcasts/ ./
