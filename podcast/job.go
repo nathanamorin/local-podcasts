@@ -35,6 +35,29 @@ const (
 	JobTypeTranscribe JobType = "transcribe"
 )
 
+// Job priorities: higher is claimed first (ClaimJob orders by priority DESC,
+// then created_at). Downloads come first so new episodes become playable
+// ASAP; fingerprinting (ad detection) and transcription are nice-to-have
+// enrichment that can lag behind, so they only run once there are no
+// pending downloads for a worker to pick up.
+const (
+	JobPriorityLow     = 0
+	JobPriorityDefault = 50
+	JobPriorityHigh    = 100
+)
+
+// jobPriorityFor returns the claim priority for a job type.
+func jobPriorityFor(t JobType) int {
+	switch t {
+	case JobTypeDownload:
+		return JobPriorityHigh
+	case JobTypeFingerprint, JobTypeTranscribe:
+		return JobPriorityLow
+	default:
+		return JobPriorityDefault
+	}
+}
+
 // JobStatus is the lifecycle state of a Job.
 type JobStatus string
 
@@ -67,21 +90,27 @@ const jobMaxAttempts = 5
 type Job struct {
 	ID   string  `json:"id" gorm:"primaryKey"`
 	Type JobType `json:"type" gorm:"index"`
-	// status,created_at is a composite index backing ClaimJob's
-	// "WHERE status = pending ORDER BY created_at LIMIT 1" query. Without
+	// status,priority,created_at is a composite index backing ClaimJob's
+	// "WHERE status = pending ORDER BY priority DESC, created_at LIMIT 1"
+	// query (it also serves PendingJobCount's status-only filter as a
+	// prefix; it replaced the older status,created_at index, which
+	// InitDB drops). Without
 	// it, that ORDER BY requires sorting every matching row from scratch on
 	// every single claim call - with a backlog of tens of thousands of
 	// pending jobs and dozens of worker pods polling every few seconds on a
 	// single serialized writer connection, that made claims queue up
 	// severely enough that almost no jobs got processed.
-	PodcastID string     `json:"podcast_id" gorm:"index"`
-	EpisodeID string     `json:"episode_id" gorm:"index"`
-	Status    JobStatus  `json:"status" gorm:"index:idx_job_status_created,priority:1"`
+	PodcastID string    `json:"podcast_id" gorm:"index"`
+	EpisodeID string    `json:"episode_id" gorm:"index"`
+	Status    JobStatus `json:"status" gorm:"index:idx_job_status_priority_created,priority:1"`
+	// Priority is derived from Type at enqueue time (see jobPriorityFor);
+	// higher is claimed first.
+	Priority  int        `json:"priority" gorm:"not null;default:0;index:idx_job_status_priority_created,priority:2,sort:desc"`
 	Attempts  int        `json:"attempts"`
 	ClaimedBy string     `json:"claimed_by,omitempty"`
 	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
 	Error     string     `json:"error,omitempty"`
-	CreatedAt time.Time  `json:"created_at" gorm:"index:idx_job_status_created,priority:2"`
+	CreatedAt time.Time  `json:"created_at" gorm:"index:idx_job_status_priority_created,priority:3"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
@@ -167,6 +196,7 @@ func enqueueJob(db *gorm.DB, jobType JobType, podcastID, episodeID string) (bool
 	job := Job{
 		ID:        uuid.NewString(),
 		Type:      jobType,
+		Priority:  jobPriorityFor(jobType),
 		PodcastID: podcastID,
 		EpisodeID: episodeID,
 		Status:    JobStatusPending,
@@ -334,8 +364,28 @@ func requeueStuckJobs(db *gorm.DB) error {
 		Updates(map[string]interface{}{"status": JobStatusPending, "claimed_by": "", "claimed_at": nil}).Error
 }
 
-// ClaimJob atomically claims the oldest pending job matching one of the
-// given types, for the named worker. It returns (nil, nil) if no job is
+// BackfillJobPriorities sets Priority on existing non-terminal jobs whose
+// stored priority doesn't match jobPriorityFor(type) - e.g. jobs enqueued
+// before the priority column existed (which AutoMigrate defaults to 0), or
+// after the priority mapping changes. Cheap and idempotent: run at startup.
+func BackfillJobPriorities(db *gorm.DB) error {
+	for _, t := range []JobType{JobTypeDownload, JobTypeFingerprint, JobTypeDetectAds, JobTypeTranscribe} {
+		p := jobPriorityFor(t)
+		res := db.Model(&Job{}).
+			Where("type = ? AND priority != ? AND status IN ?", t, p, []JobStatus{JobStatusPending, JobStatusProcessing}).
+			Update("priority", p)
+		if res.Error != nil {
+			return fmt.Errorf("backfill priority for %s jobs: %w", t, res.Error)
+		}
+		if res.RowsAffected > 0 {
+			klog.Infof("backfilled priority=%d on %d %s jobs", p, res.RowsAffected, t)
+		}
+	}
+	return nil
+}
+
+// ClaimJob atomically claims the highest-priority (then oldest) pending job
+// matching one of the given types, for the named worker. It returns (nil, nil) if no job is
 // available.
 func ClaimJob(db *gorm.DB, types []JobType, workerID string) (*Job, error) {
 	if err := requeueStuckJobs(db); err != nil {
@@ -357,8 +407,10 @@ func ClaimJob(db *gorm.DB, types []JobType, workerID string) (*Job, error) {
 		var job Job
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Where("type IN ? AND status = ?", types, JobStatusPending).
-			Order("created_at").
-			First(&job).Error
+			Order("priority DESC, created_at").
+			// Take, not First: First appends ", id" to the ORDER BY,
+			// which the status,priority,created_at index can't satisfy.
+			Take(&job).Error
 		if err != nil {
 			if err == gorm.ErrRecordNotFound {
 				return nil

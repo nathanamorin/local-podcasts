@@ -49,6 +49,19 @@ func InitDB(dsn string, maxOpenConns int) (*gorm.DB, error) {
 		return nil, fmt.Errorf("automigrate: %w", err)
 	}
 
+	// Superseded by idx_job_status_priority_created (see Job). AutoMigrate
+	// never drops indexes, so remove the stale one explicitly - it would
+	// only add write overhead on the hot jobs table.
+	if db.Migrator().HasIndex(&Job{}, "idx_job_status_created") {
+		if err := db.Migrator().DropIndex(&Job{}, "idx_job_status_created"); err != nil {
+			return nil, fmt.Errorf("drop idx_job_status_created: %w", err)
+		}
+	}
+
+	if err := BackfillJobPriorities(db); err != nil {
+		return nil, err
+	}
+
 	registerQueryDurationCallbacks(db, "primary")
 
 	return db, nil

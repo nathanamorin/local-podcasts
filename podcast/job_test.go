@@ -409,3 +409,43 @@ func TestPendingJobCount(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 }
+
+func TestClaimJob_PrioritizesDownloadsOverEnrichment(t *testing.T) {
+	db := openTestDB(t)
+
+	// Enrichment jobs enqueued first (older) must still lose to a newer download.
+	require.NoError(t, EnqueueTranscribeJob(db, "pod1", "ep1"))
+	require.NoError(t, EnqueueFingerprintJob(db, "pod1", "ep2"))
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, EnqueueDownloadJob(db, "pod1", "ep3"))
+
+	all := []JobType{JobTypeDownload, JobTypeFingerprint, JobTypeTranscribe}
+	job, err := ClaimJob(db, all, "worker-1")
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	assert.Equal(t, JobTypeDownload, job.Type)
+	assert.Equal(t, JobPriorityHigh, job.Priority)
+
+	// Equal-priority low jobs fall back to FIFO.
+	job, err = ClaimJob(db, all, "worker-1")
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	assert.Equal(t, "ep1", job.EpisodeID)
+	assert.Equal(t, JobPriorityLow, job.Priority)
+}
+
+func TestBackfillJobPriorities(t *testing.T) {
+	db := openTestDB(t)
+
+	require.NoError(t, EnqueueDownloadJob(db, "pod1", "ep1"))
+	// Simulate a job enqueued before the priority column existed.
+	require.NoError(t, db.Model(&Job{}).Where("1 = 1").Update("priority", 0).Error)
+
+	require.NoError(t, BackfillJobPriorities(db))
+
+	var job Job
+	require.NoError(t, db.First(&job).Error)
+	assert.Equal(t, JobPriorityHigh, job.Priority)
+	assert.False(t, db.Migrator().HasIndex(&Job{}, "idx_job_status_created"))
+	assert.True(t, db.Migrator().HasIndex(&Job{}, "idx_job_status_priority_created"))
+}
